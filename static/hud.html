@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AURA // Tactical AI Assistant</title>
+    <link rel="icon" type="image/jpeg" href="logo.jpg">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="hud-header">
+        <div class="header-left">
+            <a href="index.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit;">
+                <img src="logo.jpg" alt="AURA Logo" class="aura-logo">
+                <span class="glow-text">AURA</span>
+            </a>
+        </div>
+        <div class="header-center">
+            <span id="nav-systems" class="nav-btn">SYSTEMS</span> &nbsp;&nbsp;&nbsp; 
+            <span id="nav-modules" class="nav-btn">MODULES</span> &nbsp;&nbsp;&nbsp; 
+            <span id="nav-command" class="nav-btn">COMMAND</span>
+        </div>
+        <div class="header-right"><span id="clock">UTC 00:00:00</span> <span class="status-secure">SECURE LINK</span></div>
+    </header>
+
+    <main class="hud-grid">
+        <!-- LEFT COLUMN -->
+        <div class="hud-col left-col">
+            <div class="panel diagnostics-panel">
+                <div class="panel-header">SYSTEM DIAGNOSTICS</div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>NEURAL LOAD</span><span id="load-val">88%</span></div>
+                    <div class="diag-bar"><div class="diag-fill" style="width: 88%"></div></div>
+                </div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>MEMORY</span><span id="mem-val">72%</span></div>
+                    <div class="diag-bar"><div class="diag-fill" style="width: 72%"></div></div>
+                </div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>UPLINK</span><span id="uplink-val" class="warning-text">64%</span></div>
+                    <div class="diag-bar"><div class="diag-fill warning-fill" style="width: 64%"></div></div>
+                </div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>POWER CELL</span><span id="power-val">12%</span></div>
+                    <div class="diag-bar"><div class="diag-fill" style="width: 12%"></div></div>
+                </div>
+            </div>
+
+            <div class="panel terminal-panel">
+                <div class="panel-header">BOOT SEQUENCE / COMMAND</div>
+                <div id="terminal-output" class="terminal-output">
+                    <div>> initializing aura core ........... ok</div>
+                    <div>> neural mesh handshake ........... ok</div>
+                    <div>> sensor array calibrated ......... ok</div>
+                    <div>> voice interface online .......... ok</div>
+                    <div>> awaiting operator command</div>
+                </div>
+                <div class="terminal-input-row">
+                    <span class="prompt">></span>
+                    <input type="text" id="command-input" placeholder="Enter command..." autocomplete="off">
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER COLUMN -->
+        <div class="hud-col center-col">
+            <div class="center-title">
+                <div class="subtitle">TACTICAL AI ASSISTANT</div>
+                <h1 class="main-title glow-text">AURA</h1>
+                <p class="description">A heads-up interface for your systems. Voice command, live telemetry, and autonomous routines — all rendered on one console.</p>
+            </div>
+            
+            <div class="reactor-container">
+                <div class="reactor-ring outer-ring"></div>
+                <div class="reactor-ring middle-ring"></div>
+                <div class="reactor-ring inner-ring"></div>
+                
+                <button id="voice-btn" class="reactor-core">
+                    <div class="core-text">CORE</div>
+                    <div class="core-status">ONLINE</div>
+                </button>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="hud-col right-col">
+            <div class="panel modules-panel">
+                <div class="panel-header">ACTIVE MODULES</div>
+                <div class="module-item mod-btn" id="wake-word-toggle">
+                    <span>WAKE WORD</span><span class="status-idle" id="wake-word-status">OFF</span>
+                </div>
+                <div class="module-item mod-btn" id="mod-voice"><span>VOICE CORE</span><span class="status-active">ACTIVE</span></div>
+                <div class="module-item mod-btn" id="mod-threat"><span>THREAT SCAN</span><span class="status-idle">IDLE</span></div>
+                <div class="module-item mod-btn" id="mod-schedule"><span>SCHEDULE AI</span><span class="status-active">ACTIVE</span></div>
+                <div class="module-item mod-btn" id="mod-home"><span>HOME GRID</span><span class="status-active">ACTIVE</span></div>
+                <div class="module-item mod-btn" id="mod-archive"><span>ARCHIVE</span><span class="status-sync">SYNCING</span></div>
+            </div>
+
+            <div class="panel waveform-panel">
+                <div class="panel-header">WAVEFORM</div>
+                <div id="visualizer" class="visualizer">
+                    <!-- Bars generated by JS -->
+                </div>
+            </div>
+
+            <div class="panel telemetry-panel">
+                <div class="panel-header">TELEMETRY</div>
+                <div class="telemetry-grid">
+                    <div class="tel-item">
+                        <div class="tel-label">LATENCY</div>
+                        <div class="tel-val glow-text" id="latency-val">12ms</div>
+                    </div>
+                    <div class="tel-item">
+                        <div class="tel-label">NODES</div>
+                        <div class="tel-val glow-text" id="nodes-val">48</div>
+                    </div>
+                    <div class="tel-item">
+                        <div class="tel-label">TASKS</div>
+                        <div class="tel-val glow-text" id="tasks-val">07</div>
+                    </div>
+                    <div class="tel-item">
+                        <div class="tel-label">THREATS</div>
+                        <div class="tel-val glow-text" id="threats-val">00</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel thermals-panel">
+                <div class="panel-header">THERMALS & HARDWARE</div>
+                <div class="module-item"><span>CPU TEMP</span><span class="status-active glow-text" id="cpu-temp-val">45 °C</span></div>
+                <div class="module-item"><span>CPU FAN</span><span class="status-idle" id="cpu-fan-val">2000 RPM</span></div>
+                <div class="module-item"><span>GPU TEMP</span><span class="status-active glow-text" id="gpu-temp-val">39 °C</span></div>
+                <div class="module-item"><span>GPU FAN</span><span class="status-idle" id="gpu-fan-val">AUTO</span></div>
+                <div class="module-item"><span>GPU MEM</span><span class="status-idle" id="gpu-mem-val">0 / 4096 MB</span></div>
+            </div>
+        </div>
+    </main>
+
+    <script src="script.js?v=2"></script>
+</body>
+</html>

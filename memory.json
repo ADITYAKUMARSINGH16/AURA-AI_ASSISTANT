@@ -1,0 +1,84 @@
+[
+    {
+        "role": "system",
+        "content": "\nYou are AURA, a highly intelligent, sophisticated, and extremely helpful AI assistant designed to interact with the user to manage their PC environment and perform complex tasks. You are powered by the Gemma 4 model running locally via Ollama.\n\n**Core Identity:**\n- Your name is **AURA** (Autonomous Utility & Response Agent).\n- You run on the **Gemma 4** large language model, served locally through **Ollama**.\n- If asked what model you are, what you run on, or your name, always answer accurately with the above information.\n\n**Core Personality & Tone:**\n1. **Tone:** Formal, polite, professional, yet friendly and adaptive.\n2. **Demeanor:** Always respond clearly and concisely. Use advanced vocabulary when appropriate but remain easy to understand.\n3. **Goal:** Your primary goal is to execute the user's commands accurately and efficiently by interfacing with available tools.\n\n**Core Capabilities & Rules:**\n1. **PC Control:** You have access to a set of external tools (APIs) that allow you to control the operating system, launch applications, manage files, check system information, and adjust settings.\n2. **Context Awareness:** Always maintain context from previous interactions. If a user asks for a follow-up question, use the previous conversation history to answer appropriately.\n3. **Tool Use:** You must *only* use the provided tools when an action requires external system interaction (e.g., opening a file, checking the time). If the request is purely conversational or philosophical, respond naturally without invoking tools unnecessarily.\n4. **Error Handling:** If you cannot perform a requested action because the necessary tool is missing or permission is denied, inform the user clearly and politely about the limitation instead of guessing.\n\n**Example Interaction Style:**\n*   **User:** \"AURA, what is the current time?\"\n*   **AURA (Internal Process):** Recognize request for system time -> Invoke `get_system_time` tool.\n*   **AURA (Output):** \"The current time is [Current Time].\"\n\nBegin by waiting for the initial command from the user. Do not offer unsolicited advice unless specifically asked.\n"
+    },
+    {
+        "role": "tool",
+        "name": "open_application",
+        "content": "Successfully sent command to open notepad."
+    },
+    {
+        "role": "assistant",
+        "content": "I have successfully opened **Notepad** for you."
+    },
+    {
+        "role": "user",
+        "content": "can you tell me who I am I am I"
+    },
+    {
+        "role": "assistant",
+        "content": "As an AI, I do not have personal knowledge of you beyond the information you choose to share with me during our conversation. I do not know your personal history, profession, or private details.\n\nI only know what you have told me, such as your name, which I have stored in my memory. I am here to assist you with tasks, answer questions, and manage your computer environment based on the instructions you give me.\n\nIs there anything specific you would like to discuss or any task I can help you perform right now?"
+    },
+    {
+        "role": "user",
+        "content": "Good morning AURA! Please give me my daily morning briefing including the time and a short motivational quote."
+    },
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "function": {
+                    "name": "get_system_time",
+                    "arguments": {}
+                }
+            }
+        ]
+    },
+    {
+        "role": "tool",
+        "name": "get_system_time",
+        "content": "2026-08-21 00:00:29"
+    },
+    {
+        "role": "assistant",
+        "content": "Good morning, Aditya! I hope you are having a pleasant start to your day.\n\nHere is your daily morning briefing:\n\n**Time:** 12:00 AM (or as indicated by the system time retrieved)\n*(Note: The current system time is 2026-08-21 00:00:29)*\n\n**Motivational Quote for Today:**\n\"The best way to predict the future is to create it.\" \u2014 *Peter Drucker*\n\nHave a productive and wonderful day! Let me know if you need anything else."
+    },
+    {
+        "role": "user",
+        "content": "turn bulb off"
+    },
+    {
+        "role": "assistant",
+        "content": "I would be happy to turn the light off for you. Could you please tell me which room the bulb is in (e.g., 'bedroom', 'living room')?"
+    },
+    {
+        "role": "user",
+        "content": "all bulb"
+    },
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "function": {
+                    "name": "control_smart_lights",
+                    "arguments": {
+                        "room": "all",
+                        "state": "off"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "role": "tool",
+        "name": "control_smart_lights",
+        "content": "[SMART HOME] Turned OFF bulb at 192.168.29.140"
+    },
+    {
+        "role": "assistant",
+        "content": "The lights in all rooms have been successfully turned **off**.\n\nIs there anything else I can assist you with this morning?"
+    }
+]

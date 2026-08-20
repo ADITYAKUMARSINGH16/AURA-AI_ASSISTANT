@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AURA // Autonomous Utility & Response Agent</title>
+    <meta name="description" content="AURA is a locally-hosted, voice-enabled AI assistant with a Tactical HUD interface. Voice command, live telemetry, smart home control, and autonomous routines — all on one console.">
+    <link rel="icon" type="image/jpeg" href="logo.jpg">
+    <link rel="stylesheet" href="landing.css?v=2">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- CINEMATIC BOOT OVERLAY -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="boot-overlay">
+        <div class="boot-scanline"></div>
+        <div class="boot-content">
+            <div class="boot-logo-small">
+                <img src="logo.jpg" alt="AURA" class="boot-logo-img">
+            </div>
+            <div id="boot-lines" class="boot-lines"></div>
+            <div class="boot-prompt" id="boot-prompt">
+                <span class="boot-blink">PRESS ANY KEY OR CLICK TO CONTINUE</span>
+            </div>
+        </div>
+        <div class="boot-progress">
+            <div class="boot-progress-bar" id="boot-progress-bar"></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- CUSTOM CURSOR -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div class="cursor-dot" id="cursor-dot"></div>
+    <div class="cursor-ring" id="cursor-ring"></div>
+    <canvas class="cursor-trail-canvas" id="cursor-trail"></canvas>
+
+    <!-- WebGL Shader Background -->
+    <canvas id="shader-bg"></canvas>
+
+    <!-- Scan line overlay -->
+    <div class="scanlines"></div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- FLOATING HUD OVERLAYS -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div class="hud-overlay hud-tl" id="hud-coords">
+        <div class="hud-ov-label">COORDINATES</div>
+        <div class="hud-ov-value" id="hud-lat">28.6139° N</div>
+        <div class="hud-ov-value" id="hud-lng">77.2090° E</div>
+    </div>
+    <div class="hud-overlay hud-tr" id="hud-signal">
+        <div class="hud-ov-label">SIGNAL</div>
+        <div class="hud-ov-bars">
+            <span class="sig-bar active"></span>
+            <span class="sig-bar active"></span>
+            <span class="sig-bar active"></span>
+            <span class="sig-bar active"></span>
+            <span class="sig-bar"></span>
+        </div>
+        <div class="hud-ov-value" id="hud-sig-val">87%</div>
+    </div>
+    <div class="hud-overlay hud-bl" id="hud-threat">
+        <div class="hud-ov-label">THREAT LEVEL</div>
+        <div class="hud-ov-value threat-clear" id="hud-threat-val">CLEAR</div>
+        <div class="hud-ov-sub">0 anomalies detected</div>
+    </div>
+    <div class="hud-overlay hud-br" id="hud-clock-ov">
+        <div class="hud-ov-label">SYSTEM CLOCK</div>
+        <div class="hud-ov-value" id="hud-sys-clock">00:00:00</div>
+        <div class="hud-ov-sub" id="hud-uptime">UPTIME: 0h 0m 0s</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- NAVIGATION -->
+    <!-- ═══════════════════════════════════════════ -->
+    <nav class="nav-bar" id="navbar">
+        <div class="nav-left">
+            <img src="logo.jpg" alt="AURA" class="nav-logo">
+            <span class="nav-brand">AURA</span>
+        </div>
+        <div class="nav-links">
+            <a href="#hero" class="nav-link active">HOME</a>
+            <a href="#features" class="nav-link">SYSTEMS</a>
+            <a href="#globe" class="nav-link">NETWORK</a>
+            <a href="#terminal" class="nav-link">TERMINAL</a>
+            <a href="#compare" class="nav-link">VS</a>
+            <a href="#capabilities" class="nav-link">SPECS</a>
+        </div>
+        <div class="nav-right">
+            <button class="sound-toggle" id="sound-toggle" title="Toggle Sound">
+                <svg class="sound-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                </svg>
+                <svg class="sound-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18" style="display:none">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                    <line x1="23" y1="9" x2="17" y2="15"/>
+                    <line x1="17" y1="9" x2="23" y2="15"/>
+                </svg>
+            </button>
+            <span class="nav-status"><span class="status-dot"></span>NOMINAL</span>
+        </div>
+    </nav>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SECTION 1: HERO -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section class="hero" id="hero">
+        <div class="ambient-orb orb-1"></div>
+        <div class="ambient-orb orb-2"></div>
+        <div class="ambient-orb orb-3"></div>
+
+        <div class="hero-content">
+            <div class="logo-system">
+                <div class="orbit orbit-1"><div class="orbit-dot"></div></div>
+                <div class="orbit orbit-2"><div class="orbit-dot"></div></div>
+                <div class="orbit orbit-3"><div class="orbit-dot"></div></div>
+                <div class="logo-core">
+                    <img src="logo.jpg" alt="AURA Logo" class="hero-logo" id="hero-logo">
+                    <div class="logo-pulse"></div>
+                    <div class="logo-pulse delay-1"></div>
+                    <div class="logo-pulse delay-2"></div>
+                </div>
+            </div>
+
+            <div class="hero-text">
+                <div class="hero-subtitle" id="hero-subtitle">
+                    <span class="bracket">[</span>
+                    <span class="subtitle-inner">AUTONOMOUS UTILITY & RESPONSE AGENT</span>
+                    <span class="bracket">]</span>
+                </div>
+                <h1 class="hero-title glitch" data-text="AURA">AURA</h1>
+                <p class="hero-tagline" id="hero-tagline"></p>
+                <div class="hero-meta">
+                    <span class="meta-tag">v2.0</span>
+                    <span class="meta-sep">|</span>
+                    <span class="meta-tag">LOCAL INFERENCE</span>
+                    <span class="meta-sep">|</span>
+                    <span class="meta-tag">FULLY OFFLINE</span>
+                    <span class="meta-sep">|</span>
+                    <span class="meta-tag">OPEN SOURCE</span>
+                </div>
+            </div>
+
+            <div class="hero-actions">
+                <a href="hud.html" class="cta-primary" id="cta-init">
+                    <span class="cta-icon">⬡</span>
+                    <span class="cta-text">INITIALIZE SYSTEM</span>
+                    <span class="cta-arrow">→</span>
+                </a>
+                <a href="#features" class="cta-secondary">
+                    <span class="cta-text">EXPLORE SYSTEMS</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="scroll-indicator">
+            <div class="scroll-line"></div>
+            <span class="scroll-text">SCROLL TO EXPLORE</span>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SECTION 2: FEATURES -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section class="features" id="features">
+        <div class="section-header reveal">
+            <div class="section-tag">// SYSTEM MODULES</div>
+            <h2 class="section-title">CORE <span class="accent">CAPABILITIES</span></h2>
+            <p class="section-desc">Six integrated subsystems working in concert. Each module operates independently but communicates through AURA's neural mesh.</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card reveal" id="feat-voice">
+                <div class="card-glow"></div>
+                <div class="card-number">01</div>
+                <div class="card-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                </div>
+                <h3 class="card-title">VOICE CORE</h3>
+                <p class="card-desc">Neural TTS with Edge voices. Wake-word activation — say "Hey Aura" and she's listening. Real-time speech-to-text transcription.</p>
+                <div class="card-status"><span class="status-dot active"></span>ACTIVE</div>
+            </div>
+            <div class="feature-card reveal" id="feat-vision">
+                <div class="card-glow"></div>
+                <div class="card-number">02</div>
+                <div class="card-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </div>
+                <h3 class="card-title">SCREEN VISION</h3>
+                <p class="card-desc">Captures and reads text from your screen using Tesseract OCR. Full screenshot analysis on demand.</p>
+                <div class="card-status"><span class="status-dot active"></span>ACTIVE</div>
+            </div>
+            <div class="feature-card reveal" id="feat-home">
+                <div class="card-glow"></div>
+                <div class="card-number">03</div>
+                <div class="card-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                </div>
+                <h3 class="card-title">HOME GRID</h3>
+                <p class="card-desc">Local network scanning and smart home device control. Monitor, manage, and automate your connected infrastructure.</p>
+                <div class="card-status"><span class="status-dot syncing"></span>SYNCING</div>
+            </div>
+            <div class="feature-card reveal" id="feat-system">
+                <div class="card-glow"></div>
+                <div class="card-number">04</div>
+                <div class="card-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                </div>
+                <h3 class="card-title">SYS CONTROL</h3>
+                <p class="card-desc">Lock, sleep, shutdown. Volume, media playback. Launch and kill applications. Full OS-level command authority.</p>
+                <div class="card-status"><span class="status-dot active"></span>ACTIVE</div>
+            </div>
+            <div class="feature-card reveal" id="feat-web">
+                <div class="card-glow"></div>
+                <div class="card-number">05</div>
+                <div class="card-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                </div>
+                <h3 class="card-title">WEB INTEL</h3>
+                <p class="card-desc">Real-time internet search via DuckDuckGo. Clipboard integration. Instant knowledge retrieval without leaving the console.</p>
+                <div class="card-status"><span class="status-dot active"></span>ONLINE</div>
+            </div>
+            <div class="feature-card reveal" id="feat-memory">
+                <div class="card-glow"></div>
+                <div class="card-number">06</div>
+                <div class="card-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                </div>
+                <h3 class="card-title">NEURAL ARCHIVE</h3>
+                <p class="card-desc">Persistent memory across sessions. AURA remembers context, preferences, and history. Long-term knowledge that evolves.</p>
+                <div class="card-status"><span class="status-dot syncing"></span>SYNCING</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SECTION 3: 3D GLOBE -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section class="globe-section" id="globe">
+        <div class="section-header reveal">
+            <div class="section-tag">// NETWORK TOPOLOGY</div>
+            <h2 class="section-title">GLOBAL <span class="accent">NETWORK</span></h2>
+            <p class="section-desc">AURA's neural mesh spans your local infrastructure. Every node, every connection — mapped and monitored in real-time.</p>
+        </div>
+        <div class="globe-container reveal">
+            <canvas id="globe-canvas"></canvas>
+            <div class="globe-stats">
+                <div class="globe-stat">
+                    <span class="gs-value" id="gs-nodes">48</span>
+                    <span class="gs-label">ACTIVE NODES</span>
+                </div>
+                <div class="globe-stat">
+                    <span class="gs-value" id="gs-connections">127</span>
+                    <span class="gs-label">CONNECTIONS</span>
+                </div>
+                <div class="globe-stat">
+                    <span class="gs-value" id="gs-latency">12ms</span>
+                    <span class="gs-label">AVG LATENCY</span>
+                </div>
+                <div class="globe-stat">
+                    <span class="gs-value" id="gs-uptime">99.97%</span>
+                    <span class="gs-label">UPTIME</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SECTION 4: INTERACTIVE TERMINAL -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section class="terminal-section" id="terminal">
+        <div class="section-header reveal">
+            <div class="section-tag">// LIVE INTERFACE</div>
+            <h2 class="section-title">COMMAND <span class="accent">TERMINAL</span></h2>
+            <p class="section-desc">Try it yourself. Type a command below — AURA responds in real-time.</p>
+        </div>
+
+        <div class="terminal-showcase reveal">
+            <div class="terminal-window">
+                <div class="terminal-toolbar">
+                    <div class="terminal-dots">
+                        <span class="dot dot-red"></span>
+                        <span class="dot dot-yellow"></span>
+                        <span class="dot dot-green"></span>
+                    </div>
+                    <div class="terminal-title">AURA :: INTERACTIVE CONSOLE</div>
+                    <div class="terminal-controls">
+                        <span class="ctrl-btn">—</span>
+                        <span class="ctrl-btn">□</span>
+                        <span class="ctrl-btn">✕</span>
+                    </div>
+                </div>
+                <div class="terminal-body" id="terminal-body">
+                    <div class="terminal-line boot-line">> AURA CORE v2.0 — Boot Sequence Initiated</div>
+                </div>
+                <div class="terminal-input-area">
+                    <span class="prompt-char">></span>
+                    <input type="text" id="terminal-input" class="terminal-input" placeholder="Type 'help' for commands..." autocomplete="off" spellcheck="false">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SECTION 5: COMPARISON TABLE -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section class="compare-section" id="compare">
+        <div class="section-header reveal">
+            <div class="section-tag">// TACTICAL ADVANTAGE</div>
+            <h2 class="section-title">AURA <span class="accent">vs CLOUD</span></h2>
+            <p class="section-desc">See why running your AI locally changes everything.</p>
+        </div>
+
+        <div class="compare-table-wrap reveal">
+            <table class="compare-table">
+                <thead>
+                    <tr>
+                        <th class="compare-feature-col">FEATURE</th>
+                        <th class="compare-aura-col"><img src="logo.jpg" alt="" class="compare-logo"> AURA</th>
+                        <th>ALEXA</th>
+                        <th>SIRI</th>
+                        <th>CHATGPT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="compare-feature">DATA PRIVACY</td>
+                        <td class="compare-aura"><span class="check-yes">✦ 100% LOCAL</span></td>
+                        <td><span class="check-no">✗ Cloud</span></td>
+                        <td><span class="check-no">✗ Cloud</span></td>
+                        <td><span class="check-no">✗ Cloud</span></td>
+                    </tr>
+                    <tr>
+                        <td class="compare-feature">COST</td>
+                        <td class="compare-aura"><span class="check-yes">✦ FREE</span></td>
+                        <td><span class="check-mid">~ Subscription</span></td>
+                        <td><span class="check-mid">~ Ecosystem</span></td>
+                        <td><span class="check-no">✗ $20/mo</span></td>
+                    </tr>
+                    <tr>
+                        <td class="compare-feature">OFFLINE MODE</td>
+                        <td class="compare-aura"><span class="check-yes">✦ FULL</span></td>
+                        <td><span class="check-no">✗ None</span></td>
+                        <td><span class="check-mid">~ Limited</span></td>
+                        <td><span class="check-no">✗ None</span></td>
+                    </tr>
+                    <tr>
+                        <td class="compare-feature">CUSTOMIZATION</td>
+                        <td class="compare-aura"><span class="check-yes">✦ TOTAL</span></td>
+                        <td><span class="check-mid">~ Skills</span></td>
+                        <td><span class="check-no">✗ Locked</span></td>
+                        <td><span class="check-mid">~ GPTs</span></td>
+                    </tr>
+                    <tr>
+                        <td class="compare-feature">OPEN SOURCE</td>
+                        <td class="compare-aura"><span class="check-yes">✦ YES</span></td>
+                        <td><span class="check-no">✗ No</span></td>
+                        <td><span class="check-no">✗ No</span></td>
+                        <td><span class="check-no">✗ No</span></td>
+                    </tr>
+                    <tr>
+                        <td class="compare-feature">SYSTEM CONTROL</td>
+                        <td class="compare-aura"><span class="check-yes">✦ FULL OS</span></td>
+                        <td><span class="check-mid">~ Smart Home</span></td>
+                        <td><span class="check-mid">~ Apple Only</span></td>
+                        <td><span class="check-no">✗ None</span></td>
+                    </tr>
+                    <tr>
+                        <td class="compare-feature">SCREEN VISION</td>
+                        <td class="compare-aura"><span class="check-yes">✦ OCR</span></td>
+                        <td><span class="check-no">✗ No</span></td>
+                        <td><span class="check-no">✗ No</span></td>
+                        <td><span class="check-mid">~ API Only</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SECTION 6: SPECS -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section class="capabilities" id="capabilities">
+        <div class="section-header reveal">
+            <div class="section-tag">// TECHNICAL SPECIFICATIONS</div>
+            <h2 class="section-title">SYSTEM <span class="accent">SPECS</span></h2>
+        </div>
+
+        <div class="specs-grid reveal">
+            <div class="spec-card">
+                <div class="spec-value" data-target="100">0</div>
+                <div class="spec-unit">%</div>
+                <div class="spec-label">LOCAL EXECUTION</div>
+                <div class="spec-bar"><div class="spec-fill" style="--fill: 100%"></div></div>
+            </div>
+            <div class="spec-card">
+                <div class="spec-value" data-target="6">0</div>
+                <div class="spec-unit">MODULES</div>
+                <div class="spec-label">ACTIVE SYSTEMS</div>
+                <div class="spec-bar"><div class="spec-fill" style="--fill: 100%"></div></div>
+            </div>
+            <div class="spec-card">
+                <div class="spec-value" data-target="12">0</div>
+                <div class="spec-unit">ms</div>
+                <div class="spec-label">AVG LATENCY</div>
+                <div class="spec-bar"><div class="spec-fill" style="--fill: 15%"></div></div>
+            </div>
+            <div class="spec-card">
+                <div class="spec-value" data-target="0">0</div>
+                <div class="spec-unit">BYTES</div>
+                <div class="spec-label">DATA SENT EXTERNALLY</div>
+                <div class="spec-bar"><div class="spec-fill" style="--fill: 0%"></div></div>
+            </div>
+        </div>
+
+        <div class="tech-stack reveal">
+            <div class="tech-item"><span class="tech-label">ENGINE</span><span class="tech-value">Ollama + Gemma 4</span></div>
+            <div class="tech-item"><span class="tech-label">VOICE</span><span class="tech-value">Edge TTS + Google STT</span></div>
+            <div class="tech-item"><span class="tech-label">VISION</span><span class="tech-value">Tesseract OCR</span></div>
+            <div class="tech-item"><span class="tech-label">BACKEND</span><span class="tech-value">FastAPI + Uvicorn</span></div>
+            <div class="tech-item"><span class="tech-label">PRIVACY</span><span class="tech-value">100% Local Inference</span></div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SECTION 7: HUD CAROUSEL -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section class="carousel-section" id="carousel">
+        <div class="section-header reveal">
+            <div class="section-tag">// INTERFACE GALLERY</div>
+            <h2 class="section-title">HUD <span class="accent">PREVIEW</span></h2>
+            <p class="section-desc">The tactical heads-up display — your command center rendered in the browser.</p>
+        </div>
+
+        <div class="carousel-wrap reveal">
+            <div class="carousel-track" id="carousel-track">
+                <div class="carousel-slide">
+                    <img src="hud_screenshot.png" alt="AURA HUD - Full Dashboard" class="carousel-img">
+                    <div class="carousel-caption">FULL TACTICAL DASHBOARD</div>
+                </div>
+                <div class="carousel-slide">
+                    <div class="carousel-mock mock-terminal">
+                        <div class="mock-header">COMMAND TERMINAL</div>
+                        <div class="mock-line">> initializing aura core ........... <span class="mock-ok">ok</span></div>
+                        <div class="mock-line">> neural mesh handshake ........... <span class="mock-ok">ok</span></div>
+                        <div class="mock-line">> voice interface online .......... <span class="mock-ok">ok</span></div>
+                        <div class="mock-line">> awaiting operator command<span class="mock-cursor">_</span></div>
+                    </div>
+                    <div class="carousel-caption">BOOT SEQUENCE TERMINAL</div>
+                </div>
+                <div class="carousel-slide">
+                    <div class="carousel-mock mock-diagnostics">
+                        <div class="mock-header">SYSTEM DIAGNOSTICS</div>
+                        <div class="mock-diag"><span>NEURAL LOAD</span><div class="mock-bar"><div class="mock-fill" style="width:88%"></div></div><span>88%</span></div>
+                        <div class="mock-diag"><span>MEMORY</span><div class="mock-bar"><div class="mock-fill" style="width:72%"></div></div><span>72%</span></div>
+                        <div class="mock-diag"><span>UPLINK</span><div class="mock-bar"><div class="mock-fill warn" style="width:64%"></div></div><span>64%</span></div>
+                        <div class="mock-diag"><span>POWER CELL</span><div class="mock-bar"><div class="mock-fill crit" style="width:12%"></div></div><span>12%</span></div>
+                    </div>
+                    <div class="carousel-caption">LIVE DIAGNOSTICS PANEL</div>
+                </div>
+                <div class="carousel-slide">
+                    <div class="carousel-mock mock-reactor">
+                        <div class="mock-reactor-rings">
+                            <div class="mock-ring r1"></div>
+                            <div class="mock-ring r2"></div>
+                            <div class="mock-ring r3"></div>
+                            <div class="mock-core-btn">CORE<br><small>ONLINE</small></div>
+                        </div>
+                    </div>
+                    <div class="carousel-caption">ARC REACTOR — VOICE ACTIVATION</div>
+                </div>
+            </div>
+            <div class="carousel-nav">
+                <button class="carousel-btn" id="carousel-prev">◂</button>
+                <div class="carousel-dots" id="carousel-dots">
+                    <span class="c-dot active"></span>
+                    <span class="c-dot"></span>
+                    <span class="c-dot"></span>
+                    <span class="c-dot"></span>
+                </div>
+                <button class="carousel-btn" id="carousel-next">▸</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- FOOTER -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <img src="logo.jpg" alt="AURA" class="footer-logo">
+                <span class="footer-name">AURA</span>
+            </div>
+            <div class="footer-tagline">AUTONOMOUS UTILITY & RESPONSE AGENT</div>
+            <div class="footer-legal">PERSONAL / EDUCATIONAL USE — ALL SYSTEMS LOCAL</div>
+        </div>
+        <div class="footer-grid-fade"></div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="landing.js?v=2"></script>
+</body>
+</html>
