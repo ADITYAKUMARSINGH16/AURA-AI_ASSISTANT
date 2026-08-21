@@ -12,7 +12,7 @@ import psutil
 import random
 
 from agent import create_agent
-from voice import speak, listen, generate_tts_file
+from voice import speak, listen, generate_tts_file, start_wakeword_listener
 
 app = FastAPI(title="AURA API")
 
@@ -23,6 +23,12 @@ agent = create_agent()
 agent_lock = threading.Lock()
 
 pending_notifications = []
+
+def wake_word_callback():
+    pending_notifications.append("__WAKE_WORD__")
+
+# Start background wake word listener
+start_wakeword_listener(wake_word_callback)
 
 class ChatRequest(BaseModel):
     message: str
@@ -192,6 +198,171 @@ async def get_notifications():
         return {"has_notification": True, "message": msg}
     return {"has_notification": False}
 
+class ScheduleEvent(BaseModel):
+    time: str
+    event: str
+
+@app.get("/api/schedule")
+async def get_schedule():
+    import json
+    import os
+    schedule_file = "schedule.json"
+    if not os.path.exists(schedule_file):
+        return []
+    try:
+        with open(schedule_file, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+@app.post("/api/schedule")
+async def add_schedule(event: ScheduleEvent):
+    from tools.system_tools import manage_schedule
+    result = manage_schedule("add", event=event.event, time=event.time)
+    if "Successfully added" in result:
+        return {"status": "success", "message": result}
+    return {"status": "error", "message": result}
+
+@app.get("/api/memory")
+async def get_memory():
+    import json
+    import os
+    ltm_file = "long_term_memory.json"
+    if not os.path.exists(ltm_file):
+        return {}
+    try:
+        with open(ltm_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+@app.delete("/api/memory/{key}")
+async def delete_memory(key: str):
+    import json
+    import os
+    ltm_file = "long_term_memory.json"
+    if not os.path.exists(ltm_file):
+        return {"status": "error", "message": "Memory file not found"}
+    try:
+        with open(ltm_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if key in data:
+            del data[key]
+            with open(ltm_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+            return {"status": "success"}
+        return {"status": "error", "message": "Key not found"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/network/scan")
+async def network_scan():
+    try:
+        import subprocess
+        import platform
+        
+        if platform.system().lower() != "windows":
+            return {"status": "error", "message": "Network scanner is currently only optimized for Windows systems."}
+            
+        result = subprocess.check_output("arp -a", shell=True, text=True)
+        lines = result.split('\n')
+        devices = []
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 2 and "." in parts[0] and "-" in parts[1]:
+                ip = parts[0]
+                mac = parts[1]
+                if ip.startswith("192.") or ip.startswith("10.") or ip.startswith("172."):
+                    devices.append({"ip": ip, "mac": mac, "type": "node"})
+                    
+        return {"status": "success", "nodes": devices}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/processes")
+async def get_processes():
+    procs = []
+    for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+        try:
+            procs.append({
+                "pid": p.info['pid'],
+                "name": p.info['name'],
+                "cpu": p.info['cpu_percent'] or 0.0,
+                "mem": p.info['memory_percent'] or 0.0
+            })
+        except: pass
+    procs.sort(key=lambda x: x['cpu'], reverse=True)
+    return {"processes": procs[:20]}
+
+class ProcessKillRequest(BaseModel):
+    pid: int
+
+@app.post("/api/processes/kill")
+async def kill_process(req: ProcessKillRequest):
+    try:
+        import psutil
+        p = psutil.Process(req.pid)
+        p.kill()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/threats")
+async def get_threats():
+    try:
+        import win32evtlog
+        server = 'localhost'
+        logtype = 'Security'
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        hand = win32evtlog.OpenEventLog(server, logtype)
+        
+        events = win32evtlog.ReadEventLog(hand, flags, 0)
+        failed_logins = 0
+        
+        if events:
+            for event in events[:100]:
+                if event.EventID == 4625:
+                    failed_logins += 1
+                    
+        win32evtlog.CloseEventLog(hand)
+        
+        if failed_logins > 0:
+            return {"status": "ELEVATED", "count": failed_logins, "message": f"{failed_logins} failed logins."}
+        else:
+            return {"status": "CLEAR", "count": 0, "message": "No anomalies detected."}
+    except Exception as e:
+        return {"status": "ERROR", "count": 0, "message": f"Log read failed."}
+
+@app.get("/api/fs")
+async def get_fs(path: str = ""):
+    import os, string
+    try:
+        if not path:
+            drives = []
+            for d in string.ascii_uppercase:
+                if os.path.exists(f"{d}:\\"):
+                    drives.append({"name": f"{d}:\\", "path": f"{d}:\\", "is_dir": True})
+            return {"status": "success", "items": drives, "current": ""}
+        
+        if not os.path.isdir(path):
+            return {"status": "error", "message": "Not a directory"}
+            
+        items = []
+        for f in os.listdir(path):
+            try:
+                full = os.path.join(path, f)
+                items.append({
+                    "name": f,
+                    "path": full,
+                    "is_dir": os.path.isdir(full)
+                })
+            except: pass
+            
+        items.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+        return {"status": "success", "items": items, "current": path}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 import time
 from datetime import datetime
 
@@ -199,6 +370,8 @@ def run_schedule():
     """Background thread that runs scheduled tasks like the morning briefing."""
     global pending_notifications
     briefing_done_today = False
+    cpu_alert_cooldown = 0
+    mem_alert_cooldown = 0
     
     while True:
         now = datetime.now()
@@ -215,6 +388,28 @@ def run_schedule():
         # Since trigger is 08:00, this is safe.
         if now.hour == 0 and now.minute == 0:
             briefing_done_today = False
+            
+        # PROACTIVE SYSTEM ALERTS
+        try:
+            cpu_usage = psutil.cpu_percent(interval=None)
+            mem_usage = psutil.virtual_memory().percent
+            
+            if cpu_usage > 90 and cpu_alert_cooldown <= 0:
+                print(f"[ALERTS] High CPU detected: {cpu_usage}%")
+                pending_notifications.append(f"Sir, CPU usage is critically high at {cpu_usage} percent.")
+                cpu_alert_cooldown = 10  # Wait 10 iterations (5 mins) before alerting again
+                
+            if mem_usage > 90 and mem_alert_cooldown <= 0:
+                print(f"[ALERTS] High RAM detected: {mem_usage}%")
+                pending_notifications.append(f"Sir, Memory usage is critically high at {mem_usage} percent.")
+                mem_alert_cooldown = 10
+                
+            if cpu_alert_cooldown > 0:
+                cpu_alert_cooldown -= 1
+            if mem_alert_cooldown > 0:
+                mem_alert_cooldown -= 1
+        except Exception as e:
+            print(f"[ALERTS] Error checking telemetry: {e}")
             
         time.sleep(30)
 

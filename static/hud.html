@@ -8,6 +8,77 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- ═══════════════════════════════════════════ -->
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- SHORT BOOT OVERLAY -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="boot-overlay">
+        <div class="boot-scanline"></div>
+        <div class="boot-content">
+            <div class="boot-logo-small">
+                <img src="logo.jpg" alt="AURA" class="boot-logo-img">
+            </div>
+            <div id="boot-lines" class="boot-lines"></div>
+        </div>
+        <div class="boot-progress">
+            <div class="boot-progress-bar" id="boot-progress-bar"></div>
+        </div>
+    </div>
+
+    <!-- Background Elements -->
+    <canvas id="particle-bg"></canvas>
+    <div class="ambient-orb orb-1"></div>
+    <div class="ambient-orb orb-2"></div>
+
+    <!-- Scan line overlay -->
+    <div class="scanlines"></div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- FLOATING HUD OVERLAYS -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div class="hud-overlay hud-tl">
+        <div style="display: flex; gap: 20px; align-items: flex-start;">
+            <div>
+                <div class="hud-ov-label">COORDINATES</div>
+                <div class="hud-ov-value" id="hud-lat">28.6139° N</div>
+                <div class="hud-ov-value" id="hud-lng">77.2090° E</div>
+            </div>
+            <div id="notif-bell" style="position: relative; cursor: pointer; padding: 5px; pointer-events: auto;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+                <div id="notif-badge" style="display:none; position:absolute; top:0; right:0; background:var(--error); color:#fff; font-size:10px; border-radius:50%; width:16px; height:16px; text-align:center; line-height:16px;">0</div>
+            </div>
+        </div>
+    </div>
+    <div class="hud-overlay hud-tr">
+        <div class="hud-ov-label">SIGNAL / UPLINK</div>
+        <div class="hud-ov-value" id="hud-signal">██████░░</div>
+        <div class="theme-selector" style="margin-top:10px; display:flex; gap:5px; justify-content:flex-end; pointer-events: auto;">
+            <div class="theme-dot" data-theme="" style="width:12px;height:12px;background:#00f0ff;border-radius:50%;cursor:pointer;border:1px solid #00f0ff;"></div>
+            <div class="theme-dot" data-theme="theme-crimson" style="width:12px;height:12px;background:#ff2a2a;border-radius:50%;cursor:pointer;border:1px solid transparent;"></div>
+            <div class="theme-dot" data-theme="theme-emerald" style="width:12px;height:12px;background:#00ff66;border-radius:50%;cursor:pointer;border:1px solid transparent;"></div>
+            <div class="theme-dot" data-theme="theme-violet" style="width:12px;height:12px;background:#d946ef;border-radius:50%;cursor:pointer;border:1px solid transparent;"></div>
+        </div>
+    </div>
+    <div class="hud-overlay hud-bl" id="threat-box">
+        <div class="hud-ov-label">THREAT LEVEL</div>
+        <div class="hud-ov-val" id="threat-val" style="color: var(--cyan);">CLEAR</div>
+        <div id="threat-msg" style="font-size: 10px; color: var(--text-dim); margin-top: 5px;">0 anomalies detected</div>
+    </div>
+    <div class="hud-overlay hud-br" id="hud-clock-ov">
+        <div class="hud-ov-label">SYSTEM CLOCK</div>
+        <div class="hud-ov-value" id="hud-sys-clock">00:00:00</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- TOAST NOTIFICATIONS -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div class="toast-container" id="toast-container"></div>
+
     <header class="hud-header">
         <div class="header-left">
             <a href="index.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit;">
@@ -16,18 +87,34 @@
             </a>
         </div>
         <div class="header-center">
-            <span id="nav-systems" class="nav-btn">SYSTEMS</span> &nbsp;&nbsp;&nbsp; 
-            <span id="nav-modules" class="nav-btn">MODULES</span> &nbsp;&nbsp;&nbsp; 
+            <span id="nav-systems" class="nav-btn">SYSTEMS</span>
+            <span id="nav-modules" class="nav-btn">MODULES</span>
             <span id="nav-command" class="nav-btn">COMMAND</span>
         </div>
-        <div class="header-right"><span id="clock">UTC 00:00:00</span> <span class="status-secure">SECURE LINK</span></div>
+        <div class="header-right">
+            <button id="btn-shortcuts" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-family:var(--font-mono); font-size:1rem; margin-right:15px;" title="Keyboard Shortcuts">?</button>
+            <span class="status-secure"><span style="display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;margin-right:5px;box-shadow:0 0 5px var(--green);"></span>SECURE LINK</span>
+        </div>
     </header>
 
     <main class="hud-grid">
         <!-- LEFT COLUMN -->
         <div class="hud-col left-col">
-            <div class="panel diagnostics-panel">
-                <div class="panel-header">SYSTEM DIAGNOSTICS</div>
+            <!-- Schedule Panel -->
+            <div class="panel schedule-panel" draggable="true">
+                <div class="panel-header drag-handle">SCHEDULE & REMINDERS</div>
+                <div class="schedule-list" id="schedule-list">
+                    <!-- Events will be populated here -->
+                </div>
+                <div class="schedule-add">
+                    <input type="text" id="sched-time" placeholder="HH:MM" style="width: 30%;">
+                    <input type="text" id="sched-event" placeholder="Event Name" style="flex: 1;">
+                    <button class="qa-btn" id="btn-add-sched" style="padding: 5px; flex-grow: 0; min-height: 24px; font-size: 10px;">ADD</button>
+                </div>
+            </div>
+
+            <div class="panel diagnostics-panel" draggable="true">
+                <div class="panel-header drag-handle">SYSTEM DIAGNOSTICS</div>
                 <div class="diag-item">
                     <div class="diag-label"><span>NEURAL LOAD</span><span id="load-val">88%</span></div>
                     <div class="diag-bar"><div class="diag-fill" style="width: 88%"></div></div>
@@ -46,8 +133,16 @@
                 </div>
             </div>
 
-            <div class="panel terminal-panel">
-                <div class="panel-header">BOOT SEQUENCE / COMMAND</div>
+            <div class="panel terminal-panel" draggable="true">
+                <div class="panel-header drag-handle" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>COMMUNICATION LINK</span>
+                </div>
+                
+                <div class="mode-toggle">
+                    <button class="mode-btn active" id="btn-mode-term">TERMINAL</button>
+                    <button class="mode-btn" id="btn-mode-chat">CHAT</button>
+                </div>
+
                 <div id="terminal-output" class="terminal-output">
                     <div>> initializing aura core ........... ok</div>
                     <div>> neural mesh handshake ........... ok</div>
@@ -55,9 +150,44 @@
                     <div>> voice interface online .......... ok</div>
                     <div>> awaiting operator command</div>
                 </div>
+
+                <div id="chat-output" class="chat-output">
+                    <!-- Chat bubbles injected here -->
+                </div>
+
                 <div class="terminal-input-row">
                     <span class="prompt">></span>
                     <input type="text" id="command-input" placeholder="Enter command..." autocomplete="off">
+                </div>
+            </div>
+
+            <!-- Process Manager Panel -->
+            <div class="panel process-panel" draggable="true">
+                <div class="panel-header drag-handle">ACTIVE PROCESSES</div>
+                <div class="process-list" id="process-list">
+                    <!-- Processes populate here -->
+                </div>
+            </div>
+
+            <!-- WEBCAM FEED PANEL -->
+            <div class="panel webcam-panel" draggable="true">
+                <div class="panel-header drag-handle">OPTICAL SENSOR FEED</div>
+                <div class="webcam-container" style="position: relative; border: 1px solid var(--border); overflow: hidden; height: 150px; background: #000;">
+                    <video id="webcam-video" autoplay muted playsinline style="width: 100%; height: 100%; object-fit: cover; opacity: 0.8; filter: grayscale(100%) contrast(1.2) sepia(20%) hue-rotate(140deg);"></video>
+                    <canvas id="webcam-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;"></canvas>
+                    <div style="position: absolute; top: 5px; left: 5px; color: var(--cyan); font-size: 8px; z-index: 20; background: rgba(0,0,0,0.5); padding: 2px;">REC // SENSOR 01</div>
+                </div>
+            </div>
+
+            <!-- CYBER-DECK FILE EXPLORER -->
+            <div class="panel fs-panel" draggable="true" id="panel-fs">
+                <div class="panel-header drag-handle">CYBER-DECK FILE EXPLORER</div>
+                <div class="fs-controls" style="display: flex; gap: 10px; margin-bottom: 5px; align-items: center;">
+                    <button id="fs-up-btn" class="qa-btn" style="padding: 2px 6px; font-size: 10px; min-height: unset; width: auto; flex-shrink: 0;">UP</button>
+                    <div id="fs-path" style="font-size: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim);">ROOT</div>
+                </div>
+                <div class="fs-list" id="fs-list" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                    <!-- Files go here -->
                 </div>
             </div>
         </div>
@@ -67,25 +197,99 @@
             <div class="center-title">
                 <div class="subtitle">TACTICAL AI ASSISTANT</div>
                 <h1 class="main-title glow-text">AURA</h1>
-                <p class="description">A heads-up interface for your systems. Voice command, live telemetry, and autonomous routines — all rendered on one console.</p>
+                <p class="description">Voice command, live telemetry, and autonomous routines — all rendered on one console.</p>
             </div>
             
             <div class="reactor-container">
-                <div class="reactor-ring outer-ring"></div>
-                <div class="reactor-ring middle-ring"></div>
-                <div class="reactor-ring inner-ring"></div>
+                <!-- Energy Pulses -->
+                <div class="energy-pulse p1"></div>
+                <div class="energy-pulse p2"></div>
+                <div class="energy-pulse p3"></div>
                 
-                <button id="voice-btn" class="reactor-core">
+                <!-- 3D Reactor -->
+                <div id="reactor-3d" style="position:absolute; width:100%; height:100%; top:0; left:0; pointer-events:none; z-index: 1;"></div>
+                
+                <!-- 5 Ring System -->
+                <div class="reactor-ring ring-5"><div class="orbital-dot"></div><div class="orbital-dot d2"></div><div class="orbital-dot d3" style="top: 50%; left: -2px; width:4px; height:4px; background:var(--cyan-dim);"></div><div class="orbital-dot d4" style="top: 50%; right: -2px; left: auto; width:4px; height:4px; background:var(--cyan-dim);"></div></div>
+                <div class="reactor-ring ring-4">
+                    <svg viewBox="0 0 100 100" class="ring-svg"><circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20 10 40 10 10 10"/></svg>
+                </div>
+                <div class="reactor-ring ring-3"><div class="orbital-dot"></div></div>
+                <div class="reactor-ring ring-2"></div>
+                <div class="reactor-ring ring-1"></div>
+                <div class="reactor-ring sound-wave"></div>
+                
+                <button id="voice-btn" class="reactor-core" style="z-index: 2; position:relative;">
+                    <div class="core-bg"></div>
                     <div class="core-text">CORE</div>
                     <div class="core-status">ONLINE</div>
+                </button>
+            </div>
+
+            <div class="quick-actions">
+                <button class="qa-btn" id="qa-read-screen" title="Read Screen">
+                    <svg viewBox="0 0 24 24"><path d="M2 12h20M12 2v20M5 5l14 14M19 5L5 19"/></svg>
+                </button>
+                <button class="qa-btn" id="qa-lock" title="Lock System">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                </button>
+                <button class="qa-btn" id="qa-web" title="Web Search">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+                </button>
+                <button class="qa-btn" id="qa-scan" title="Threat Scan">
+                    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                 </button>
             </div>
         </div>
 
         <!-- RIGHT COLUMN -->
         <div class="hud-col right-col">
-            <div class="panel modules-panel">
-                <div class="panel-header">ACTIVE MODULES</div>
+            <!-- Thermals Panel -->
+            <div class="panel thermals-panel" draggable="true">
+                <div class="panel-header drag-handle">HARDWARE THERMALS</div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>CPU TEMP</span><span id="cpu-temp-val">45°C</span></div>
+                    <div class="diag-bar"><div class="diag-fill" id="cpu-temp-fill" style="width: 45%; background: var(--cyan);"></div></div>
+                </div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>CPU FAN</span><span id="cpu-fan-val">2000 RPM</span></div>
+                    <div class="diag-bar"><div class="diag-fill" id="cpu-fan-fill" style="width: 50%;"></div></div>
+                </div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>GPU TEMP</span><span id="gpu-temp-val">40°C</span></div>
+                    <div class="diag-bar"><div class="diag-fill" id="gpu-temp-fill" style="width: 40%; background: var(--cyan);"></div></div>
+                </div>
+                <div class="diag-item">
+                    <div class="diag-label"><span>GPU MEM</span><span id="gpu-mem-val">4096 / 8192 MB</span></div>
+                    <div class="diag-bar"><div class="diag-fill" id="gpu-mem-fill" style="width: 50%;"></div></div>
+                </div>
+                <div class="diag-item" style="border:none;">
+                    <div class="diag-label"><span>GPU FAN</span><span id="gpu-fan-val">AUTO</span></div>
+                </div>
+            </div>
+
+            <!-- Memory Viewer Panel -->
+            <div class="panel memory-panel" draggable="true">
+                <div class="panel-header drag-handle">MEMORY ARCHIVE</div>
+                <input type="text" id="memory-search" placeholder="Search memories..." style="width: 100%; background: rgba(0,240,255,0.05); border: 1px solid var(--border); color: var(--cyan); font-family: var(--font-mono); font-size: 10px; padding: 4px; outline: none; margin-bottom: 8px;">
+                <div class="memory-list" id="memory-list">
+                    <!-- Memories populate here -->
+                </div>
+            </div>
+
+            <!-- Network Grid Panel -->
+            <div class="panel network-panel" draggable="true">
+                <div class="panel-header drag-handle" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>NETWORK GRID</span>
+                    <button class="qa-btn" id="btn-net-scan" style="padding: 2px 5px; min-height: 18px; font-size: 9px; width: auto;">SCAN</button>
+                </div>
+                <div class="network-canvas-container" style="position: relative; height: 150px; border: 1px solid var(--border); background: rgba(0,0,0,0.3); overflow: hidden;">
+                    <canvas id="network-canvas"></canvas>
+                </div>
+            </div>
+
+            <div class="panel modules-panel" draggable="true">
+                <div class="panel-header drag-handle">ACTIVE MODULES</div>
                 <div class="module-item mod-btn" id="wake-word-toggle">
                     <span>WAKE WORD</span><span class="status-idle" id="wake-word-status">OFF</span>
                 </div>
@@ -96,46 +300,108 @@
                 <div class="module-item mod-btn" id="mod-archive"><span>ARCHIVE</span><span class="status-sync">SYNCING</span></div>
             </div>
 
-            <div class="panel waveform-panel">
-                <div class="panel-header">WAVEFORM</div>
+            <div class="panel quick-actions-panel" draggable="true">
+                <div class="panel-header drag-handle">QUICK ACTIONS</div>
+                <div class="qa-grid">
+                    <button class="qa-btn" id="qa-read-screen">READ SCREEN</button>
+                    <button class="qa-btn" id="qa-lock">LOCK SYSTEM</button>
+                    <button class="qa-btn" id="qa-web">WEB SEARCH</button>
+                    <button class="qa-btn" id="qa-scan">THREAT SCAN</button>
+                </div>
+                <!-- Screenshot preview -->
+                <div style="margin-top: 10px; border: 1px dashed var(--cyan-dim); height: 100px; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer;" id="screen-preview-container">
+                    <span style="font-size: 10px; color: var(--text-dim);">No recent captures</span>
+                    <img id="screen-preview-img" style="display: none; width: 100%; object-fit: cover;">
+                </div>
+            </div>
+
+            <div class="panel charts-panel" draggable="true">
+                <div class="panel-header drag-handle">LIVE TELEMETRY</div>
+                
+                <div class="chart-container">
+                    <span class="chart-label">CPU LOAD</span>
+                    <span class="chart-val" id="chart-cpu-val">0%</span>
+                    <canvas id="chart-cpu" class="system-chart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <span class="chart-label">MEMORY</span>
+                    <span class="chart-val" id="chart-mem-val">0%</span>
+                    <canvas id="chart-mem" class="system-chart"></canvas>
+                </div>
+                <div class="chart-container" style="margin-bottom:0;">
+                    <span class="chart-label">NETWORK</span>
+                    <span class="chart-val" id="chart-net-val">0ms</span>
+                    <canvas id="chart-net" class="system-chart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel" draggable="true">
+                <div class="panel-header drag-handle">MEDIA CONTROL</div>
+                <div class="spotify-panel">
+                    <div class="spotify-content">
+                        <div class="spotify-art"><svg style="width:24px;height:24px;fill:var(--cyan-mid);" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.5 0-4.5-2-4.5-4.5S9.5 7.5 12 7.5s4.5 2 4.5 4.5-2 4.5-4.5 4.5zm0-7.5c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg></div>
+                        <div class="spotify-info">
+                            <div class="sp-title">Awaiting Input...</div>
+                            <div class="sp-artist">SYSTEM MEDIA</div>
+                        </div>
+                    </div>
+                    <div class="spotify-controls">
+                        <button class="sp-btn" id="sp-prev"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+                        <button class="sp-btn" id="sp-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+                        <button class="sp-btn" id="sp-next"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel waveform-panel" draggable="true">
+                <div class="panel-header drag-handle">WAVEFORM</div>
                 <div id="visualizer" class="visualizer">
                     <!-- Bars generated by JS -->
                 </div>
             </div>
-
-            <div class="panel telemetry-panel">
-                <div class="panel-header">TELEMETRY</div>
-                <div class="telemetry-grid">
-                    <div class="tel-item">
-                        <div class="tel-label">LATENCY</div>
-                        <div class="tel-val glow-text" id="latency-val">12ms</div>
-                    </div>
-                    <div class="tel-item">
-                        <div class="tel-label">NODES</div>
-                        <div class="tel-val glow-text" id="nodes-val">48</div>
-                    </div>
-                    <div class="tel-item">
-                        <div class="tel-label">TASKS</div>
-                        <div class="tel-val glow-text" id="tasks-val">07</div>
-                    </div>
-                    <div class="tel-item">
-                        <div class="tel-label">THREATS</div>
-                        <div class="tel-val glow-text" id="threats-val">00</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="panel thermals-panel">
-                <div class="panel-header">THERMALS & HARDWARE</div>
-                <div class="module-item"><span>CPU TEMP</span><span class="status-active glow-text" id="cpu-temp-val">45 °C</span></div>
-                <div class="module-item"><span>CPU FAN</span><span class="status-idle" id="cpu-fan-val">2000 RPM</span></div>
-                <div class="module-item"><span>GPU TEMP</span><span class="status-active glow-text" id="gpu-temp-val">39 °C</span></div>
-                <div class="module-item"><span>GPU FAN</span><span class="status-idle" id="gpu-fan-val">AUTO</span></div>
-                <div class="module-item"><span>GPU MEM</span><span class="status-idle" id="gpu-mem-val">0 / 4096 MB</span></div>
-            </div>
         </div>
     </main>
 
-    <script src="script.js?v=2"></script>
+    <!-- KEYBOARD SHORTCUTS MODAL -->
+    <div class="modal-overlay" id="shortcuts-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">SYSTEM SHORTCUTS</div>
+                <button class="modal-close" id="close-shortcuts">×</button>
+            </div>
+            <div class="shortcut-item">
+                <span class="shortcut-desc">Clear Console</span>
+                <span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span>
+            </div>
+            <div class="shortcut-item">
+                <span class="shortcut-desc">Toggle Voice Core</span>
+                <span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span>
+            </div>
+            <div class="shortcut-item">
+                <span class="shortcut-desc">Close Shortcuts</span>
+                <span class="shortcut-keys"><span class="key">ESC</span></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Drawer -->
+    <div id="notif-drawer" class="notif-drawer">
+        <div class="drawer-header">
+            <span>NOTIFICATIONS</span>
+            <button id="close-drawer" style="background:none; border:none; color:var(--cyan); cursor:pointer; font-size:16px;">×</button>
+        </div>
+        <div id="notif-list" class="notif-list">
+            <!-- Notifications appear here -->
+        </div>
+    </div>
+
+    <!-- Screenshot Lightbox -->
+    <div id="lightbox-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:20000; justify-content:center; align-items:center; cursor:pointer;">
+        <img id="lightbox-img" style="max-width:90%; max-height:90%; border:2px solid var(--cyan); box-shadow:0 0 20px var(--cyan);">
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>

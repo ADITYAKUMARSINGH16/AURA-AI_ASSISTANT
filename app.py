@@ -7,8 +7,8 @@ from voice import speak, listen
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-st.set_page_config(page_title="JARVIS", page_icon="🤖", layout="wide")
-st.title("🤖 JARVIS Web Interface")
+st.set_page_config(page_title="AURA", page_icon="🤖", layout="wide")
+st.title("🤖 AURA Web Interface")
 
 # Initialize agent in session state
 if "agent" not in st.session_state:
@@ -19,7 +19,7 @@ agent = st.session_state.agent
 # Sidebar controls
 with st.sidebar:
     st.header("Controls")
-    voice_input = st.button("🎤 Speak to JARVIS", help="Click to use microphone (runs locally)")
+    voice_input = st.button("🎤 Speak to AURA", help="Click to use microphone (runs locally)")
     use_voice_output = st.checkbox("🔊 Enable Voice Output", value=True)
 
 # Display chat messages from history
@@ -59,11 +59,11 @@ if voice_input:
             user_input = None
             st.warning("Voice input failed or was cancelled.")
 
-if prompt := st.chat_input("Type your message to JARVIS here..."):
+if prompt := st.chat_input("Type your message to AURA here..."):
     user_input = prompt
     
 if user_input:
-    with st.spinner("JARVIS is thinking..."):
+    with st.spinner("AURA is thinking..."):
         response = agent.send_message(user_input)
         if use_voice_output and response:
             speak(response)

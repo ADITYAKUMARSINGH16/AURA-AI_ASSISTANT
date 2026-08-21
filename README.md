@@ -112,12 +112,20 @@ python main.py
 ```
 Select either **Text** or **Voice** mode when prompted.
 
+### 3. Streamlit Web Interface
+
+To run the lightweight chat interface via Streamlit:
+```bash
+streamlit run app.py
+```
+
 ---
 
 ## 📂 Project Architecture
 
 ```
 ├── api.py                    # FastAPI server (serves APIs, HUD, and Landing Page)
+├── app.py                    # Streamlit web interface
 ├── agent.py                  # Core agent reasoning, Ollama client & tool dispatcher
 ├── main.py                   # CLI terminal interface
 ├── memory.py                 # Short-term and long-term conversation memory manager
@@ -138,11 +146,11 @@ Select either **Text** or **Voice** mode when prompted.
 └── tools/
     ├── __init__.py           # Unified tool registration
     ├── system_tools.py       # OS, hardware telemetry & thermal monitoring
-    ├── vision_tools.py       # Tesseract screen OCR & vision
     ├── app_tools.py          # Application execution & management
     ├── web_tools.py          # DuckDuckGo search & web scraping
     ├── file_tools.py         # Local filesystem explorer
     ├── memory_tools.py       # Long-term memory query & save tools
+    ├── smart_home_tools.py   # Smart home device integration (lights, plugs)
     └── spotify_tools.py      # Media & Spotify integration
 ```
 

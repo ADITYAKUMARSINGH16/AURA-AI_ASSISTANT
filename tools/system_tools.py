@@ -95,6 +95,12 @@ def read_screen() -> str:
         # Grab screenshot
         screenshot = ImageGrab.grab()
         
+        # Save screenshot for HUD
+        capture_dir = os.path.join("static", "captures")
+        if not os.path.exists(capture_dir):
+            os.makedirs(capture_dir)
+        screenshot.save(os.path.join(capture_dir, "last_screen.png"))
+        
         # Read text
         text = pytesseract.image_to_string(screenshot)
         

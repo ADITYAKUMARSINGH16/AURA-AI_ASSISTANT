@@ -227,3 +227,48 @@ def listen(max_duration=15, fs=16000) -> str:
     except Exception as e:
         print(f"\n[Microphone Error]: {e}")
         return "SWITCH_TO_TEXT_MODE"
+
+# ──────────── Wake Word Background Listener ────────────
+def start_wakeword_listener(callback):
+    import threading
+    def listener_thread():
+        try:
+            import sounddevice as sd
+            import numpy as np
+            from openwakeword.model import Model
+            
+            RATE = 16000
+            CHUNK = 1280
+            
+            owwModel = Model(wakeword_models=['hey_jarvis'], inference_framework='onnx')
+            
+            print('[WAKE WORD] Listening for "Hey Jarvis"...')
+            
+            def audio_callback(indata, frames, time, status):
+                if status:
+                    print(status)
+                
+                # indata is shape (frames, channels), float32 or int16
+                # openwakeword expects 1D int16 array
+                audio_data = (indata[:, 0]).astype(np.int16)
+                prediction = owwModel.predict(audio_data)
+                
+                for mdl, score in prediction.items():
+                    if score > 0.5:
+                        print(f'[WAKE WORD] Detected {mdl} with score {score}')
+                        callback()
+                        owwModel.reset()
+            
+            # Start non-blocking stream
+            with sd.InputStream(samplerate=RATE, channels=1, blocksize=CHUNK, dtype='int16', callback=audio_callback):
+                while True:
+                    import time
+                    time.sleep(1)
+                    
+        except ImportError:
+            print('[WAKE WORD] openwakeword not installed. Wake word disabled.')
+        except Exception as e:
+            print(f'[WAKE WORD] Error: {e}')
+
+    t = threading.Thread(target=listener_thread, daemon=True)
+    t.start()

@@ -1,7 +1,7 @@
 ollama
 psutil
 python-dotenv
-ddgs
+duckduckgo-search
 SpeechRecognition
 pyttsx3
 sounddevice
@@ -17,3 +17,6 @@ wmi
 pypiwin32
 edge-tts
 pywizlight
+streamlit
+pystray
+openwakeword
