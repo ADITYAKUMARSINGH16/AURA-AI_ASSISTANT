@@ -16,7 +16,7 @@
 
 ### Backend & Core Logic
 - **`api.py` (FastAPI):** The primary server. Serves static files, handles API requests (`/api/chat`, `/api/tts`, `/api/telemetry`, `/api/network/scan`, `/api/processes`, `/api/security`, `/api/fs`), runs the proactive background thread (`run_schedule`), and maintains the global `agent` instance.
-- **`agent.py`:** The core AI brain. Manages the system prompt, maintains context, communicates with the Ollama API, and dynamically maps and triggers local Python functions (tools) based on LLM responses.
+- **`agent.py`:** The core AI brain. Features an **Intent Router** (using LLM categorization) to pre-process user inputs, subset available tools dynamically, and route to specific skills. It manages the system prompt, maintains context, communicates with the Ollama API, and triggers local Python functions (tools) based on LLM responses.
 - **`tray.py`:** The system tray daemon (`pystray`). Allows AURA to run invisibly in the background and provides a right-click menu to launch the web interfaces or shut down the server.
 - **`main.py`:** A standalone CLI interface for text/voice interactions without the web server.
 - **`vision.py`:** Handles image validation, OCR extraction, and `qwen3-vl` analysis, returning strictly formatted JSON context to prevent hallucinations.
@@ -58,10 +58,11 @@ The agent has access to a comprehensive suite of tools mapped in `agent.py`:
 
 ### Standard Agent Interaction (`agent.send_message`)
 1. User provides input. Any provided images are routed through `vision.py` first, and the resulting JSON analysis is injected as context.
-2. Relevant memories are searched via `memory_tools.py` and appended to the prompt.
-3. Sent to Ollama via `ollama.chat(tools=available_tools)`.
-4. If the LLM responds with a tool call, the tool is executed sequentially. For example, UI actions like `click_text` automatically take a new screenshot (`read_screen`) to feed the result back to the model.
-5. Once all tools finish, a final text response is generated and sent to the frontend.
+2. **Intent Routing (`analyze_intent`)**: The input is pre-processed to categorize the intent, flag dangerous operations, and identify if a plan is required. This drastically optimizes tool selection.
+3. Relevant memories are searched via `memory_tools.py` and appended to the prompt.
+4. Based on the categorized intent, the agent dynamically subsets tools (omitting tools entirely for simple chats to reduce latency) and sends the request to Ollama via `ollama.chat(tools=subset_tools)`.
+5. If the LLM responds with a tool call, the tool is executed sequentially. For example, UI actions like `click_text` automatically take a new screenshot (`read_screen`) to feed the result back to the model.
+6. Once all tools finish, a final text response is generated and sent to the frontend.
 
 ### Background Scheduler (`api.py:run_schedule`)
 - Runs continuously checking system state based on `proactive_config.json`.

@@ -1,9 +1,12 @@
 import ollama
 import logging
 import threading
-from tools import get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, recall_fact, search_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, click_text, click_coordinates, type_text, press_key, scroll, get_active_window, forget_fact, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan
+import time
+from tools import get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, recall_fact, search_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, forget_fact, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, run_aura_diagnostics
+from permissions import confirm_pending_action, reject_pending_action, evaluate_permission
 from config import OLLAMA_MODEL
 from memory import load_memory, save_memory
+import json
 
 logging.basicConfig(
     filename='aura_agent.log',
@@ -11,8 +14,60 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-available_tools = [get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, recall_fact, search_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, click_text, click_coordinates, type_text, press_key, scroll, get_active_window, forget_fact, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan]
+available_tools = [get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, recall_fact, search_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, forget_fact, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, confirm_pending_action, reject_pending_action, run_aura_diagnostics]
 tool_map = {tool.__name__: tool for tool in available_tools}
+
+# Intent Router Mapping
+TOOL_CATEGORIES = {
+    "CHAT": [],
+    "VISION": [read_screen],
+    "SYSTEM": [get_system_time, get_system_info, open_application, close_application, control_media, control_system_power, manage_schedule, sync_archive, confirm_pending_action, reject_pending_action, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, run_aura_diagnostics],
+    "COMPUTER_CONTROL": [open_application, close_application, read_clipboard, execute_visual_task, get_active_window],
+    "FILE": [list_directory, read_file, sync_archive],
+    "WEB_RESEARCH": [web_search],
+    "MEMORY": [remember_fact, recall_fact, search_memory, forget_fact],
+    "SMART_HOME": [discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music],
+    "SECURITY": [run_threat_scan, scan_home_network, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes],
+    "PLANNER": [report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal],
+    "VOICE": []
+}
+
+def analyze_intent(user_input: str) -> dict:
+    from skill_registry import registry
+    skill_desc = registry.get_all_skill_descriptions()
+    router_prompt = f"""
+You are the AURA intent router. Classify the user's intent into one or more of the following categories:
+CHAT, VISION, SYSTEM, COMPUTER_CONTROL, FILE, WEB_RESEARCH, MEMORY, SMART_HOME, SECURITY, PLANNER, VOICE.
+
+Determine if the request is 'is_simple' (e.g. general knowledge, greetings, single commands) and if it is 'is_dangerous' (e.g. deleting files, formatting drives, terminating essential processes, risky system changes). Also determine 'requires_plan' for multi-step tasks.
+
+Additionally, select the most relevant skill for the task from the following list (or null if none apply):
+{skill_desc}
+
+Return ONLY a valid JSON object matching this schema:
+{{
+  "categories": ["CATEGORY_NAME"],
+  "is_simple": true,
+  "is_dangerous": false,
+  "requires_plan": false,
+  "active_skill": "skill_name"
+}}
+"""
+    try:
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[
+                {'role': 'system', 'content': router_prompt},
+                {'role': 'user', 'content': user_input}
+            ],
+            format="json"
+        )
+        content = response['message']['content']
+        return json.loads(content)
+    except Exception as e:
+        logging.error(f"Router error: {e}")
+        return {"categories": ["CHAT", "SYSTEM", "COMPUTER_CONTROL", "FILE", "WEB_RESEARCH", "MEMORY", "SMART_HOME", "SECURITY"], "is_simple": False, "is_dangerous": False, "requires_plan": False, "active_skill": None}
+
 
 system_instruction = """
 You are AURA, a highly intelligent, sophisticated, and extremely helpful AI assistant designed to interact with the user to manage their PC environment and perform complex tasks. You are powered by the Gemma 4 model running locally via Ollama.
@@ -28,13 +83,11 @@ You are AURA, a highly intelligent, sophisticated, and extremely helpful AI assi
 3. **Goal:** Your primary goal is to execute the user's commands accurately and efficiently by interfacing with available tools.
 
 **Computer Control Agent Paradigm (CRITICAL):**
-You ARE fully capable of interacting directly with the graphical user interface. You have tools to move the mouse, click text (`click_text`), type on the keyboard (`type_text`), press keys (`press_key`), scroll (`scroll`), and open applications (`open_application`). Do NOT ever claim you cannot interact with the GUI.
-When asked to perform a computer task (e.g., "Open Chrome and search for X"):
-1. **Plan & Act**: Determine the first logical step and execute it using a tool.
-2. **Verify**: UI tools (like `click_text`, `type_text`, `open_application`) inherently return the new visual state of the screen or system. You MUST read this returned visual context to verify if your action succeeded before proceeding to the next step.
-3. **Loop**: Continue observing the screen state, taking the next action, and verifying until the user's ultimate goal is fully achieved. 
-4. **Intelligent Retry**: If the expected UI change did not occur, adapt and retry intelligently (e.g., wait longer, or use a different search text).
-5. **Never Blindly Guess**: Use `click_text` to reliably click UI elements based on OCR. Avoid using `click_coordinates` unless absolutely necessary.
+You ARE fully capable of interacting directly with the graphical user interface. You have a powerful tool called `execute_visual_task` which spins up a closed-loop visual agent powered by Qwen3-VL.
+When asked to perform a computer task (e.g., "Open Chrome and search for X", "Delete this file"):
+1. **Delegate**: Pass the high-level goal to `execute_visual_task("Your goal here")`. Do NOT try to manage individual clicks or keystrokes yourself.
+2. **Destructive Actions**: If the goal involves deleting, formatting, or resetting, you must set `require_confirmation=True` or explicitly ask the user for confirmation BEFORE calling the tool.
+3. **Wait**: The visual agent will autonomously run its own Observe -> Plan -> Act -> Verify loop and return the final success or failure state.
 
 **Safety & Destructive Actions Blacklist:**
 1. **Never perform destructive actions without confirmation.**
@@ -86,16 +139,78 @@ Begin by waiting for the initial command from the user. Do not offer unsolicited
 class AuraAgent:
     def __init__(self):
         self.messages = load_memory()
+        self.ai_telemetry = {
+            "model_latency": 0.0,
+            "tokens_per_sec": 0.0,
+            "prompt_tokens": 0,
+            "response_tokens": 0,
+            "tool_latency": 0.0,
+            "vision_latency": 0.0,
+            "total_task_time": 0.0
+        }
         if not self.messages:
             self.messages = [
                 {'role': 'system', 'content': system_instruction}
             ]
         
     def send_message(self, user_input: str, images: list = None, file_texts: list = None) -> str:
+        """Sends a message to the agent and returns its text response."""
+        task_start_time = time.time()
+        self.ai_telemetry["tool_latency"] = 0.0
+        self.ai_telemetry["vision_latency"] = 0.0
+        
         logging.info("--- New User Request ---")
         logging.info(f"User Input: {user_input[:200]}{'...' if len(user_input) > 200 else ''}")
         
         original_user_input = user_input
+        
+        # --- INTENT ROUTING ---
+        intent = analyze_intent(user_input)
+        categories = intent.get('categories', [])
+        is_simple = intent.get('is_simple', False)
+        is_dangerous = intent.get('is_dangerous', False)
+        requires_plan = intent.get('requires_plan', False)
+        active_skill = intent.get('active_skill')
+        
+        logging.info(f"[SUBSYSTEM_ROUTING] Active Categories: {categories} | Plan: {requires_plan} | Dangerous: {is_dangerous} | Skill: {active_skill}")
+        
+        if is_dangerous:
+            return "WARNING: The action you requested is classified as potentially dangerous or destructive. Please re-confirm explicitly that you want to proceed."
+
+        active_tools = []
+        for cat in categories:
+            if cat in TOOL_CATEGORIES:
+                active_tools.extend(TOOL_CATEGORIES[cat])
+                
+        if requires_plan:
+            active_tools.extend(TOOL_CATEGORIES.get("PLANNER", []))
+            
+        # Add required tools from active skill
+        skill_data = None
+        if active_skill:
+            from skill_registry import registry
+            skill_data = registry.get_skill(active_skill)
+            if skill_data:
+                req_tools = skill_data.get('required_tools', [])
+                for t in available_tools:
+                    if t.__name__ in req_tools and t not in active_tools:
+                        active_tools.append(t)
+                        
+        # Deduplicate tools
+        active_tools = list({t.__name__: t for t in active_tools}.values())
+        
+        # If no tools matched or it's a fallback, provide a default set
+        if not active_tools and not is_simple:
+             active_tools = available_tools
+        # --- END INTENT ROUTING ---
+        
+        if skill_data:
+            skill_ctx = f"[System Context - Active Skill: {skill_data['name']}]\n"
+            skill_ctx += f"Instructions: {skill_data.get('instructions', '')}\n"
+            skill_ctx += f"Safety Rules: {skill_data.get('safety_rules', '')}\n"
+            if skill_data.get('workflows'):
+                skill_ctx += f"Workflows: {json.dumps(skill_data.get('workflows'))}\n"
+            user_input = skill_ctx + "\nUser Request:\n" + user_input
         
         from tools.memory_tools import search_relevant_memories, extract_and_store_memory
         relevant_mems = search_relevant_memories(original_user_input)
@@ -116,7 +231,9 @@ class AuraAgent:
             vision_summaries = []
             for i, img in enumerate(images):
                 logging.info(f"Analyzing uploaded image {i+1} via internal vision pipeline...")
+                v_start = time.time()
                 summary = analyze_vision_payload(img, user_prompt=user_input)
+                self.ai_telemetry["vision_latency"] += (time.time() - v_start)
                 vision_summaries.append(f"--- Vision Analysis of Image {i+1} ---\n{summary}\n")
             
             vision_context = "\n".join(vision_summaries)
@@ -130,11 +247,23 @@ class AuraAgent:
         while True:
             logging.info(f"Sending request to model with {len(self.messages)} messages in context.")
             try:
+                m_start = time.time()
                 response = ollama.chat(
                     model=OLLAMA_MODEL,
                     messages=self.messages,
-                    tools=available_tools
+                    tools=active_tools if active_tools else None
                 )
+                m_end = time.time()
+                
+                # Update model telemetry
+                self.ai_telemetry["model_latency"] = m_end - m_start
+                self.ai_telemetry["prompt_tokens"] = response.get('prompt_eval_count', 0)
+                eval_count = response.get('eval_count', 0)
+                self.ai_telemetry["response_tokens"] = eval_count
+                eval_dur_ns = response.get('eval_duration', 0)
+                if eval_dur_ns > 0:
+                    self.ai_telemetry["tokens_per_sec"] = eval_count / (eval_dur_ns / 1e9)
+                
             except Exception as e:
                 logging.error(f"Error calling Ollama API: {e}")
                 msg_dict = {
@@ -194,13 +323,20 @@ class AuraAgent:
                 
                 if tool_name in tool_map:
                     try:
-                        # Call the python function
-                        result = str(tool_map[tool_name](**arguments))
+                        # Check permissions
+                        status = evaluate_permission(tool_name, arguments)
                         
-                        # Truncate massive strings to prevent context window overflow
-                        if len(result) > 2000:
-                            logging.warning(f"Tool '{tool_name}' output too large ({len(result)} chars), truncating.")
-                            result = result[:2000] + "... [TRUNCATED DUE TO LENGTH]"
+                        if status == "APPROVED":
+                            # Call the python function
+                            t_start = time.time()
+                            result = str(tool_map[tool_name](**arguments))
+                            self.ai_telemetry["tool_latency"] += (time.time() - t_start)
+                            # Optional truncation for extremely large text (like screen reading)
+                            if len(result) > 4000:
+                                result = result[:4000] + "\n...[TRUNCATED FOR LENGTH]..."
+                        else:
+                            # It's an action ID, meaning PENDING
+                            result = f"Tool '{tool_name}' blocked. Requires explicit user confirmation. Action ID: {status}. Tell the user you need authorization to proceed. They can click AUTHORIZE in the HUD, or simply reply 'Yes' in chat."
                             
                         logging.info(f"Tool '{tool_name}' succeeded. Result length: {len(result)}")
                         self.messages.append({
@@ -228,7 +364,8 @@ class AuraAgent:
             if 'images' in m:
                 del m['images']
                 
-        self.messages = save_memory(self.messages)
+        save_memory(self.messages)
+        self.ai_telemetry["total_task_time"] = time.time() - task_start_time
         final_content = msg_dict.get('content', '').strip()
         
         # Fallback for empty responses

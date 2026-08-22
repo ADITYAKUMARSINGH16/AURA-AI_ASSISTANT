@@ -941,6 +941,19 @@ async function updateTelemetry() {
         document.getElementById('chart-net-val').textContent = data.latency;
         drawChart('chart-net', chartData.net, '#00ff88'); // green
         
+        // AURA CORE AI Telemetry
+        if(data.ai) {
+            const ai = data.ai;
+            document.getElementById('ai-model-val').textContent = ai.model || '---';
+            document.getElementById('ai-vram-val').textContent = `${ai.vram}GB`;
+            
+            if(ai.telemetry) {
+                document.getElementById('ai-tokens-val').textContent = `${ai.telemetry.tokens_per_sec.toFixed(1)}/s`;
+                document.getElementById('ai-vision-val').textContent = `${ai.telemetry.vision_latency.toFixed(1)}s`;
+                document.getElementById('ai-tools-val').textContent = `${ai.telemetry.tool_latency.toFixed(1)}s`;
+            }
+        }
+        
     } catch (error) {
         console.error("Failed to fetch telemetry", error);
     }

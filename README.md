@@ -11,6 +11,7 @@
 - **100% Local Inference:** Zero cloud reliance — total data privacy.
 - **Cinematic Landing Page:** WebGL nebula shaders, 3D wireframe globe, boot sequence simulation, Web Audio SFX, interactive terminal, and feature comparison.
 - **Tactical HUD Interface:** Real-time sci-fi dashboard featuring live diagnostics, hardware thermals, waveform audio visualizer, and command console.
+- **Dynamic Intent Routing:** Pre-processes user inputs using an LLM to categorize requests, subset available tools dynamically, and route to specific skills for faster and more accurate execution.
 - **Advanced Agentic Planner:** AURA 2.0 creates temporary multi-step execution plans to achieve complex goals, verifying its actions automatically.
 - **Vision & GUI Control:** Full integration of Vision (VLM + OCR) allowing AURA to read the screen and safely control Windows via mouse and keyboard commands (`pyautogui`).
 - **Continuous Voice Interaction:** Advanced barge-in (interruption), silence detection, and continuous conversation mode using Edge-TTS and OpenWakeWord ("Hey Aura").
@@ -61,6 +62,7 @@ AURA 2.0 aggregates all its subsystems into a single, unified cognitive architec
 4. **System:** Deep integration via `psutil`, `wmi`, and `winreg` for telemetry, and safe desktop manipulation via `pyautogui`.
 5. **Voice:** Edge-TTS combined with PyAudio/Sounddevice and OpenWakeWord, fully supporting barge-in and conversational looping.
 6. **Security Center:** Scans for rogue executables, open listening ports, and Windows Defender profiles natively.
+7. **Intent Router:** An intelligent pre-processing layer in `agent.py` that classifies user input to optimize tool selection, detect dangerous operations, and activate specialized skills before full LLM processing.
 
 ---
 
@@ -134,7 +136,7 @@ python main.py
 
 ```
 ├── api.py                    # FastAPI server (serves APIs, HUD, Landing Page, and Scheduler)
-├── agent.py                  # Core agent reasoning, Ollama client & tool dispatcher
+├── agent.py                  # Core agent reasoning, Intent Routing, Ollama client & tool dispatcher
 ├── main.py                   # CLI terminal interface
 ├── tray.py                   # Windows System Tray daemon for background execution
 ├── vision.py                 # Multi-modal vision pipeline (OCR + Qwen3-VL)

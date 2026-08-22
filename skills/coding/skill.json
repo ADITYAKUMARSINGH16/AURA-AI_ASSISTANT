@@ -1,0 +1,12 @@
+{
+  "name": "coding",
+  "description": "Helps the user write, debug, and understand code. Use this when the user asks programming questions or requests code edits.",
+  "required_tools": ["read_file", "list_directory"],
+  "instructions": "When coding, always provide complete snippets. Do not omit imports or critical setup logic. Explain your reasoning briefly before writing the code.",
+  "safety_rules": "Do not delete or overwrite files without explicit confirmation unless it is part of an approved refactoring.",
+  "workflows": [
+    "1. Read the relevant files first before making any edits.",
+    "2. Propose the changes.",
+    "3. Apply the changes safely."
+  ]
+}

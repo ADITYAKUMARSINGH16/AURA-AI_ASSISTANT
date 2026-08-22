@@ -1,0 +1,114 @@
+{
+    "semantic": [
+        {
+            "id": "25d3680c-c7c4-4f93-98f4-8139b48b509a",
+            "category": "important information",
+            "content": "user_name: Aditya",
+            "importance": 5,
+            "timestamp": "2026-08-22T14:01:01.216020",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "preferences",
+            "content": "Favorite programming language is Rust.",
+            "importance": 7,
+            "id": "796cafae-8924-4365-bc74-df50f9582cf4",
+            "timestamp": "2026-08-22T14:01:01.216196",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "important information",
+            "content": "The user is interacting with a system known as the 'Tactical AI Assistant' named AURA.",
+            "importance": 8,
+            "id": "5400cb41-c2f0-46ce-abdd-7bb1695135a2",
+            "timestamp": "2026-08-22T15:34:46.325677",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "important information",
+            "content": "The system currently displays a live operational view of the AURA AI system, including system metrics (CPU, GPU temperature, Battery level) and log history.",
+            "importance": 6,
+            "id": "4d808c83-1025-44e5-8f17-05cd8e759213",
+            "timestamp": "2026-08-22T15:34:46.325704",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "projects",
+            "content": "User is actively working on a project named 'AURA-AI-ASSISTANT' using an 'Antigravity IDE' and interacting with the AURA system.",
+            "importance": 9,
+            "id": "08a3bf3b-6a82-471c-b9ca-183f28d23023",
+            "timestamp": "2026-08-22T16:06:05.001806",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "important information",
+            "content": "The user utilizes a system referred to as 'AURA' for coding, system management, and AI assistance.",
+            "importance": 10,
+            "id": "b02ad1ec-0798-49b4-88c8-88788b4bc050",
+            "timestamp": "2026-08-22T16:06:05.001925",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "preferences",
+            "content": "The user operates in a dark theme environment.",
+            "importance": 6,
+            "id": "f8787aaa-a2ce-4ffc-b269-a42146f4a320",
+            "timestamp": "2026-08-22T16:06:05.001990",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "recurring tasks",
+            "content": "The user engages in tasks related to API integration, system setup (server/browser subagent), and UI connectivity testing.",
+            "importance": 8,
+            "id": "b5e9673e-140d-4375-a6dd-6de28ec33030",
+            "timestamp": "2026-08-22T16:06:05.002066",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "DSA stands for Data Structures and Algorithms. It is the mathematical study of the design, analysis, and implementation of algorithms, and the efficient storage and organization of data structures.",
+            "importance": 10,
+            "id": "30d72af4-e2fb-4c05-9e58-b4248bb09021",
+            "timestamp": "2026-08-22T21:18:04.799738",
+            "source_context": "Extracted from: what is dsa..."
+        },
+        {
+            "layer": "semantic",
+            "category": "concepts",
+            "content": "Data Structures involve specific ways of organizing and storing data (e.g., arrays, linked lists, stacks, queues, trees, graphs).",
+            "importance": 9,
+            "id": "bf429633-7f6b-4ea2-8002-78c4fb4e108e",
+            "timestamp": "2026-08-22T21:18:04.799819",
+            "source_context": "Extracted from: what is dsa..."
+        },
+        {
+            "layer": "semantic",
+            "category": "concepts",
+            "content": "Algorithms are step-by-step procedures for solving a problem (e.g., sorting algorithms like Merge Sort, searching algorithms like Binary Search, graph traversal algorithms).",
+            "importance": 9,
+            "id": "de6fb7ff-0982-4aa2-8a06-c7c1b7c0ebb4",
+            "timestamp": "2026-08-22T21:18:04.799891",
+            "source_context": "Extracted from: what is dsa..."
+        },
+        {
+            "layer": "semantic",
+            "category": "principles",
+            "content": "Mastering DSA is fundamental for writing efficient, scalable, and well-structured code.",
+            "importance": 8,
+            "id": "d5784049-ea4f-47d8-a440-c91435d570d6",
+            "timestamp": "2026-08-22T21:18:04.799961",
+            "source_context": "Extracted from: what is dsa..."
+        }
+    ],
+    "episodic": [],
+    "procedural": []
+}

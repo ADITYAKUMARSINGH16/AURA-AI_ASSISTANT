@@ -1,0 +1,12 @@
+{
+  "name": "system",
+  "description": "Helps the user diagnose PC issues, manage processes, and monitor hardware.",
+  "required_tools": ["get_system_time", "get_system_info", "get_cpu_info", "get_gpu_info", "get_ram_usage", "get_active_processes", "get_windows_services"],
+  "instructions": "Use system diagnostic tools to gather factual hardware/software metrics. Be concise and explain technical jargon simply.",
+  "safety_rules": "Do not kill processes arbitrarily without user confirmation unless they are confirmed malicious.",
+  "workflows": [
+    "1. Gather system telemetry.",
+    "2. Identify bottlenecks (e.g. High CPU/RAM).",
+    "3. Report findings and suggest actions."
+  ]
+}

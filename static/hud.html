@@ -133,6 +133,26 @@
                 </div>
             </div>
 
+            <!-- AURA CORE PERFORMANCE -->
+            <div class="panel ai-core-panel" draggable="true" id="panel-ai-core">
+                <div class="panel-header drag-handle">AURA CORE</div>
+                <div class="diag-item" style="border:none; margin-bottom: 2px;">
+                    <div class="diag-label"><span>MODEL</span><span id="ai-model-val" style="color: var(--cyan);">---</span></div>
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom: 2px;">
+                    <div class="diag-label"><span>TOKENS</span><span id="ai-tokens-val" style="color: var(--cyan);">0.0/s</span></div>
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom: 2px;">
+                    <div class="diag-label"><span>VISION</span><span id="ai-vision-val" style="color: var(--cyan);">0.0s</span></div>
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom: 2px;">
+                    <div class="diag-label"><span>TOOLS</span><span id="ai-tools-val" style="color: var(--cyan);">0.0s</span></div>
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom: 2px;">
+                    <div class="diag-label"><span>VRAM</span><span id="ai-vram-val" style="color: var(--cyan);">0.0GB</span></div>
+                </div>
+            </div>
+
             <div class="panel terminal-panel" draggable="true">
                 <div class="panel-header drag-handle" style="display:flex; justify-content:space-between; align-items:center;">
                     <span>COMMUNICATION LINK</span>
@@ -198,6 +218,20 @@
                 <div id="sec-alerts-container" style="margin-bottom: 8px;">
                 </div>
                 <div style="font-size: 10px; color: var(--text-dim); max-height: 100px; overflow-y: auto; font-family: var(--font-mono); white-space: pre-wrap;" id="sec-details-container">Initializing security sweep...</div>
+            </div>
+
+            <!-- PENDING CONFIRMATIONS -->
+            <div class="panel permissions-panel" draggable="true" id="panel-permissions">
+                <div class="panel-header drag-handle" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>SECURITY CLEARANCE</span>
+                    <label style="font-size:8px; display:flex; align-items:center; gap:3px; cursor:pointer;" title="Auto-approve MEDIUM risk tools">
+                        <input type="checkbox" id="trusted-mode-toggle" style="margin:0;"> TRUSTED MODE
+                    </label>
+                </div>
+                <div class="permissions-list" id="permissions-list" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                    <!-- Pending actions will appear here -->
+                    <div style="font-size: 10px; color: var(--text-dim); text-align: center; padding: 10px;">NO PENDING ACTIONS</div>
+                </div>
             </div>
 
             <!-- CYBER-DECK FILE EXPLORER -->

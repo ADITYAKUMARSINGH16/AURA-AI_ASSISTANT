@@ -124,6 +124,20 @@ async def get_telemetry():
         gpu_mem = "N/A"
         gpu_fan = "N/A"
     
+    try:
+        from config import OLLAMA_MODEL
+    except ImportError:
+        OLLAMA_MODEL = "UNKNOWN"
+        
+    vram_gb = "0.0"
+    if gpu_mem != "N/A" and gpu_mem != "0 / 0 MB":
+        try:
+            # gpu_mem format is "XXXX / YYYY MB"
+            used_mb = float(gpu_mem.split('/')[0].strip())
+            vram_gb = f"{used_mb / 1024:.1f}"
+        except Exception:
+            pass
+
     return {
         "cpu": int(cpu),
         "memory": int(mem),
@@ -137,7 +151,12 @@ async def get_telemetry():
         "cpu_fan": cpu_fan,
         "gpu_temp": gpu_temp,
         "gpu_mem": gpu_mem,
-        "gpu_fan": gpu_fan
+        "gpu_fan": gpu_fan,
+        "ai": {
+            "model": OLLAMA_MODEL.upper().split(':')[0],
+            "vram": vram_gb,
+            "telemetry": agent.ai_telemetry if 'agent' in globals() else {}
+        }
     }
 
 @app.post("/api/chat")
@@ -149,7 +168,36 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     # We no longer speak locally via background_tasks if use_voice_output is true.
     # The frontend will hit /api/tts to fetch the audio and play it.
         
-    return {"response": response_text}
+    return {"status": "success", "response": response_text}
+
+@app.get("/api/permissions/pending")
+async def get_pending_permissions():
+    from permissions import get_pending_actions, TRUSTED_AUTOMATION_ENABLED
+    return {
+        "status": "success",
+        "pending": get_pending_actions(),
+        "trusted_automation": TRUSTED_AUTOMATION_ENABLED
+    }
+
+@app.post("/api/permissions/confirm/{action_id}")
+async def confirm_permission(action_id: str):
+    from permissions import confirm_pending_action
+    result = confirm_pending_action(action_id)
+    return {"status": "success", "message": result}
+
+@app.post("/api/permissions/reject/{action_id}")
+async def reject_permission(action_id: str):
+    from permissions import reject_pending_action
+    result = reject_pending_action(action_id)
+    return {"status": "success", "message": result}
+
+@app.post("/api/permissions/trusted_mode")
+async def set_trusted_mode(req: Request):
+    data = await req.json()
+    enabled = data.get("enabled", False)
+    from permissions import toggle_trusted_automation
+    toggle_trusted_automation(enabled)
+    return {"status": "success", "enabled": enabled}
 
 @app.get("/api/tts")
 async def tts(text: str):
@@ -645,6 +693,87 @@ def run_schedule():
                         pass
         except:
             pass
+            
+        # 4. Persistent Goal Evaluation
+        try:
+            from tools.goal_tools import _load_goals, _save_goals
+            from config import OLLAMA_MODEL
+            import ollama
+            
+            goals = _load_goals()
+            needs_save = False
+            
+            for g in goals:
+                if not g.get("enabled"):
+                    continue
+                    
+                last_run_str = g.get("last_run")
+                if last_run_str:
+                    try:
+                        last_run_dt = datetime.fromisoformat(last_run_str)
+                        if (now - last_run_dt).total_seconds() < 300: # 5 minute evaluation cycle
+                            continue
+                    except:
+                        pass
+                
+                # Check cooldown for notifications
+                can_notify = True
+                last_notified_str = g.get("last_notified")
+                if last_notified_str:
+                    try:
+                        last_notified_dt = datetime.fromisoformat(last_notified_str)
+                        if (now - last_notified_dt).total_seconds() < g.get("cooldown", 3600):
+                            can_notify = False
+                    except:
+                        pass
+                
+                if not can_notify:
+                    continue # Skip evaluation if we're in a notification cooldown to save compute
+                    
+                g["last_run"] = now.isoformat()
+                needs_save = True
+                
+                print(f"[SCHEDULER] Evaluating Goal: {g['name']}")
+                
+                # Build context using allowed tools
+                tool_context = "Available data from allowed tools:\n"
+                from agent import tool_map
+                for t_name in g.get("allowed_tools", []):
+                    if t_name in tool_map:
+                        try:
+                            res = str(tool_map[t_name]())
+                            tool_context += f"- {t_name}: {res[:500]}\n"
+                        except Exception as e:
+                            tool_context += f"- {t_name}: Error {e}\n"
+                            
+                prompt = f"""Goal: {g['name']}
+Description: {g['description']}
+Conditions: {g['monitoring_conditions']}
+Rules: {g['notification_rules']}
+
+{tool_context}
+
+Based on the tool data, evaluate this goal.
+If the goal is violated and requires a notification, output the exact message for the user.
+If NO notification is needed, output EXACTLY "ALL_GOOD".
+DO NOT perform any destructive actions."""
+                
+                try:
+                    res = ollama.chat(
+                        model=OLLAMA_MODEL,
+                        messages=[{'role': 'user', 'content': prompt}]
+                    )
+                    out = res['message']['content'].strip()
+                    if out and "ALL_GOOD" not in out:
+                        pending_notifications.append(out)
+                        g["last_notified"] = now.isoformat()
+                except Exception as e:
+                    print(f"Goal evaluation error: {e}")
+                    
+            if needs_save:
+                _save_goals(goals)
+        except Exception as e:
+            print(f"Goal system error in schedule: {e}")
             
         time.sleep(30)
 

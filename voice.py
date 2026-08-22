@@ -19,7 +19,7 @@ import asyncio
 #   en-GB-RyanNeural      - Male, British
 #   en-IN-PrabhatNeural   - Male, Indian English
 
-EDGE_TTS_VOICE = "en-US-GuyNeural"
+EDGE_TTS_VOICE = "en-US-AriaNeural"
 EDGE_TTS_RATE = "+0%"
 
 _TEMP_DIR = tempfile.gettempdir()

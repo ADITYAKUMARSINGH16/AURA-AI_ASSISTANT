@@ -1,0 +1,11 @@
+{
+  "name": "browser",
+  "description": "Helps the user search the web and navigate browser interfaces.",
+  "required_tools": ["web_search", "execute_visual_task"],
+  "instructions": "When asked to research or open web pages, use web_search for factual data, or use execute_visual_task to physically open the browser for the user if requested.",
+  "safety_rules": "Do not execute online purchases or submit forms with personal data without explicit user confirmation.",
+  "workflows": [
+    "1. Use web_search to find information.",
+    "2. If physical interaction is required, use execute_visual_task."
+  ]
+}
