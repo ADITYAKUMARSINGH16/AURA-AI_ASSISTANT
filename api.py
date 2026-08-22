@@ -30,15 +30,33 @@ def wake_word_callback():
 # Start background wake word listener
 start_wakeword_listener(wake_word_callback)
 
+from typing import List, Optional, Dict
+
 class ChatRequest(BaseModel):
     message: str
     use_voice_output: bool = True
+    images: Optional[List[str]] = None
+    file_texts: Optional[List[Dict[str, str]]] = None
 
 @app.get("/api/history")
 async def get_history():
     # Filter out system and tool messages for the frontend
     history = [msg for msg in agent.messages if msg.get("role") in ("user", "assistant")]
     return history  # Return as a plain JSON array
+
+@app.get("/api/logs")
+async def get_logs():
+    import os
+    log_file = "aura_agent.log"
+    if not os.path.exists(log_file):
+        return {"status": "error", "message": "Log file not found."}
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        # Return last 50 lines
+        return {"status": "success", "lines": lines[-50:]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/telemetry")
 async def get_telemetry():
@@ -126,7 +144,7 @@ async def get_telemetry():
 async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     # Send message and get response
     with agent_lock:
-        response_text = agent.send_message(req.message)
+        response_text = agent.send_message(req.message, images=req.images, file_texts=req.file_texts)
     
     # We no longer speak locally via background_tasks if use_voice_output is true.
     # The frontend will hit /api/tts to fetch the audio and play it.
@@ -160,11 +178,31 @@ async def voice_listen(background_tasks: BackgroundTasks):
     
     # Speak the response (handled by frontend now)
     
+    # Check if conversation should continue (if it ends with a question mark)
+    continue_conv = response_text.strip().endswith('?')
+    
     return {
         "status": "success",
         "transcription": text,
-        "response": response_text
+        "response": response_text,
+        "continue": continue_conv
     }
+
+@app.post("/api/voice/stop")
+async def voice_stop():
+    from voice import stop_speaking
+    stop_speaking()
+    return {"status": "success", "message": "Voice playback stopped."}
+
+class SpeakingStatus(BaseModel):
+    is_speaking: bool
+
+@app.post("/api/voice/speaking")
+async def set_speaking_status(status: SpeakingStatus):
+    import voice
+    voice.is_speaking = status.is_speaking
+    return {"status": "success"}
+
 
 @app.post("/api/voice/wake_and_listen")
 async def wake_and_listen(background_tasks: BackgroundTasks):
@@ -183,12 +221,15 @@ async def wake_and_listen(background_tasks: BackgroundTasks):
     
     # Speak the response (handled by frontend now)
     
+    # Check if conversation should continue (if it ends with a question mark)
+    continue_conv = response_text.strip().endswith('?')
+    
     return {
         "status": "success",
         "transcription": text,
-        "response": response_text
+        "response": response_text,
+        "continue": continue_conv
     }
-
 @app.get("/api/notifications")
 async def get_notifications():
     global pending_notifications
@@ -229,15 +270,15 @@ async def get_memory():
     import os
     ltm_file = "long_term_memory.json"
     if not os.path.exists(ltm_file):
-        return {}
+        return []
     try:
         with open(ltm_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
-        return {}
+        return []
 
-@app.delete("/api/memory/{key}")
-async def delete_memory(key: str):
+@app.delete("/api/memory/{memory_id}")
+async def delete_memory(memory_id: str):
     import json
     import os
     ltm_file = "long_term_memory.json"
@@ -246,14 +287,39 @@ async def delete_memory(key: str):
     try:
         with open(ltm_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        if key in data:
-            del data[key]
+            
+        initial_len = len(data)
+        data = [mem for mem in data if mem.get("id") != memory_id]
+        
+        if len(data) < initial_len:
             with open(ltm_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
             return {"status": "success"}
-        return {"status": "error", "message": "Key not found"}
+        return {"status": "error", "message": "ID not found"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.get("/api/proactive")
+async def get_proactive():
+    from api import load_proactive_config
+    return load_proactive_config()
+
+class ProactiveConfigUpdate(BaseModel):
+    enabled: bool
+    thresholds: dict
+
+@app.post("/api/proactive")
+async def update_proactive(req: ProactiveConfigUpdate):
+    import json
+    config = {
+        "enabled": req.enabled,
+        "cooldown_iterations": 30,
+        "thresholds": req.thresholds
+    }
+    with open("proactive_config.json", 'w') as f:
+        json.dump(config, f, indent=4)
+    return {"status": "success"}
+
 
 @app.get("/api/network/scan")
 async def network_scan():
@@ -332,6 +398,44 @@ async def get_threats():
             return {"status": "CLEAR", "count": 0, "message": "No anomalies detected."}
     except Exception as e:
         return {"status": "ERROR", "count": 0, "message": f"Log read failed."}
+@app.get("/api/security")
+async def get_security():
+    from tools.security_tools import get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes
+    try:
+        defender = get_windows_defender_status()
+        firewall = get_firewall_status()
+        ports = get_listening_ports()
+        files = get_suspicious_files()
+        processes = analyze_suspicious_processes()
+        devices = get_removable_devices()
+        
+        # Calculate simplistic risk level based on keywords
+        alerts = []
+        if "DISABLED" in defender:
+            alerts.append("Windows Defender Real-Time Protection is DISABLED.")
+        if "WARN:" in processes:
+            alerts.append("Suspicious processes detected.")
+        if "Suspicious/Recent Executables Found" in files:
+            alerts.append("Recent executables found in drop locations.")
+            
+        risk_level = "HIGH" if alerts else "LOW"
+        if risk_level == "LOW" and ("DISABLED" in firewall or "No active listening ports" not in ports):
+            risk_level = "MEDIUM"
+            
+        return {
+            "status": "success",
+            "risk_level": risk_level,
+            "alerts": alerts,
+            "defender": defender,
+            "firewall": firewall,
+            "ports": ports,
+            "files": files,
+            "processes": processes,
+            "devices": devices
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/fs")
 async def get_fs(path: str = ""):
@@ -366,16 +470,63 @@ async def get_fs(path: str = ""):
 import time
 from datetime import datetime
 
+def load_proactive_config():
+    import json
+    import os
+    config_file = "proactive_config.json"
+    default_config = {
+        "enabled": True,
+        "cooldown_iterations": 30,
+        "thresholds": {
+            "cpu_percent": 90,
+            "ram_percent": 90,
+            "gpu_temp_c": 85,
+            "cpu_temp_c": 90,
+            "disk_percent": 90,
+            "battery_percent_low": 20
+        }
+    }
+    if not os.path.exists(config_file):
+        with open(config_file, 'w') as f:
+            json.dump(default_config, f, indent=4)
+        return default_config
+    try:
+        with open(config_file, 'r') as f:
+            return json.load(f)
+    except:
+        return default_config
+
+def get_top_process():
+    import psutil
+    try:
+        procs = [(p.info['name'], p.info['cpu_percent']) for p in psutil.process_iter(['name', 'cpu_percent']) if p.info['cpu_percent']]
+        procs.sort(key=lambda x: x[1], reverse=True)
+        return procs[0][0] if procs else "unknown process"
+    except:
+        return "unknown process"
+
 def run_schedule():
-    """Background thread that runs scheduled tasks like the morning briefing."""
+    """Background thread that runs scheduled tasks and proactive telemetry monitoring."""
     global pending_notifications
     briefing_done_today = False
-    cpu_alert_cooldown = 0
-    mem_alert_cooldown = 0
+    
+    violations = {
+        "cpu": 0, "ram": 0, "gpu_temp": 0, "disk": 0, "battery": 0
+    }
+    
+    cooldowns = {
+        "cpu": 0, "ram": 0, "gpu_temp": 0, "disk": 0, "battery": 0, "schedule": {}
+    }
+    
+    VIOLATION_LIMIT = 10 # 5 minutes at 30s intervals
+    
+    import json
+    import os
+    from datetime import datetime, timedelta
     
     while True:
         now = datetime.now()
-        # Trigger daily briefing at 8:00 AM
+        
         if now.hour == 8 and now.minute == 0 and not briefing_done_today:
             print("[SCHEDULER] Triggering morning briefing...")
             with agent_lock:
@@ -383,33 +534,117 @@ def run_schedule():
             pending_notifications.append(response)
             briefing_done_today = True
             
-        # Reset the flag at midnight (00:00)
-        # Note: If trigger was also 00:00, this would immediately reset it and cause an infinite loop.
-        # Since trigger is 08:00, this is safe.
         if now.hour == 0 and now.minute == 0:
             briefing_done_today = False
             
-        # PROACTIVE SYSTEM ALERTS
-        try:
-            cpu_usage = psutil.cpu_percent(interval=None)
-            mem_usage = psutil.virtual_memory().percent
+        config = load_proactive_config()
+        if config.get("enabled", True):
+            thresh = config.get("thresholds", {})
+            cool_max = config.get("cooldown_iterations", 30)
             
-            if cpu_usage > 90 and cpu_alert_cooldown <= 0:
-                print(f"[ALERTS] High CPU detected: {cpu_usage}%")
-                pending_notifications.append(f"Sir, CPU usage is critically high at {cpu_usage} percent.")
-                cpu_alert_cooldown = 10  # Wait 10 iterations (5 mins) before alerting again
+            for k in cooldowns:
+                if k != "schedule" and cooldowns[k] > 0:
+                    cooldowns[k] -= 1
+                    
+            try:
+                # --- CPU ---
+                cpu_usage = psutil.cpu_percent(interval=None)
+                if cpu_usage > thresh.get("cpu_percent", 90):
+                    violations["cpu"] += 1
+                else:
+                    violations["cpu"] = 0
+                    
+                if violations["cpu"] >= VIOLATION_LIMIT and cooldowns["cpu"] <= 0:
+                    top_proc = get_top_process()
+                    pending_notifications.append(f"Sir, CPU usage has sustained above {thresh.get('cpu_percent', 90)}% for 5 minutes. Top consuming process is {top_proc}.")
+                    cooldowns["cpu"] = cool_max
+                    violations["cpu"] = 0
+
+                # --- RAM ---
+                mem_usage = psutil.virtual_memory().percent
+                if mem_usage > thresh.get("ram_percent", 90):
+                    violations["ram"] += 1
+                else:
+                    violations["ram"] = 0
+                    
+                if violations["ram"] >= VIOLATION_LIMIT and cooldowns["ram"] <= 0:
+                    pending_notifications.append(f"Sir, RAM usage has sustained above {thresh.get('ram_percent', 90)}% for 5 minutes.")
+                    cooldowns["ram"] = cool_max
+                    violations["ram"] = 0
+                    
+                # --- DISK ---
+                disk_usage = psutil.disk_usage('C:\\').percent
+                if disk_usage > thresh.get("disk_percent", 90):
+                    violations["disk"] += 1
+                else:
+                    violations["disk"] = 0
+                    
+                if violations["disk"] >= VIOLATION_LIMIT and cooldowns["disk"] <= 0:
+                    pending_notifications.append(f"Sir, your C: drive is almost full, sustained above {thresh.get('disk_percent', 90)}% capacity.")
+                    cooldowns["disk"] = cool_max
+                    violations["disk"] = 0
+                    
+                # --- BATTERY ---
+                battery = psutil.sensors_battery()
+                if battery and not battery.power_plugged and battery.percent < thresh.get("battery_percent_low", 20):
+                    violations["battery"] += 1
+                else:
+                    violations["battery"] = 0
+                    
+                if violations["battery"] >= 2 and cooldowns["battery"] <= 0:
+                    pending_notifications.append(f"Sir, your battery is running critically low at {battery.percent}%. Please plug in your device.")
+                    cooldowns["battery"] = cool_max
+                    violations["battery"] = 0
+                    
+                # --- TEMPS (GPU) ---
+                try:
+                    import subprocess
+                    gpu_result = subprocess.check_output(
+                        "nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits",
+                        shell=True, text=True, stderr=subprocess.DEVNULL
+                    )
+                    gpu_temp = int(gpu_result.strip())
+                    if gpu_temp > thresh.get("gpu_temp_c", 85):
+                        violations["gpu_temp"] += 1
+                    else:
+                        violations["gpu_temp"] = 0
+                        
+                    if violations["gpu_temp"] >= VIOLATION_LIMIT and cooldowns["gpu_temp"] <= 0:
+                        pending_notifications.append(f"Sir, GPU temperature has been above {thresh.get('gpu_temp_c', 85)}°C for 5 minutes. Consider checking your cooling.")
+                        cooldowns["gpu_temp"] = cool_max
+                        violations["gpu_temp"] = 0
+                except:
+                    pass
+                    
+            except Exception as e:
+                print(f"[ALERTS] Error checking telemetry: {e}")
                 
-            if mem_usage > 90 and mem_alert_cooldown <= 0:
-                print(f"[ALERTS] High RAM detected: {mem_usage}%")
-                pending_notifications.append(f"Sir, Memory usage is critically high at {mem_usage} percent.")
-                mem_alert_cooldown = 10
+        # 3. Schedule Monitoring
+        try:
+            schedule_file = "schedule.json"
+            if os.path.exists(schedule_file):
+                with open(schedule_file, 'r') as f:
+                    schedule = json.load(f)
                 
-            if cpu_alert_cooldown > 0:
-                cpu_alert_cooldown -= 1
-            if mem_alert_cooldown > 0:
-                mem_alert_cooldown -= 1
-        except Exception as e:
-            print(f"[ALERTS] Error checking telemetry: {e}")
+                for item in schedule:
+                    evt_time_str = item.get("time", "")
+                    evt_name = item.get("event", "")
+                    evt_id = f"{evt_time_str}_{evt_name}"
+                    
+                    try:
+                        if ":" in evt_time_str and len(evt_time_str) == 5:
+                            evt_dt = datetime.strptime(f"{now.date()} {evt_time_str}", "%Y-%m-%d %H:%M")
+                        else:
+                            evt_dt = datetime.strptime(evt_time_str, "%Y-%m-%d %H:%M")
+                            
+                        diff = (evt_dt - now).total_seconds()
+                        if 0 <= diff <= 300 and evt_id not in cooldowns["schedule"]:
+                            pending_notifications.append(f"Reminder: Your scheduled task '{evt_name}' is due shortly at {evt_time_str}.")
+                            cooldowns["schedule"][evt_id] = True
+                    except:
+                        pass
+        except:
+            pass
             
         time.sleep(30)
 

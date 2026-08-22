@@ -28,7 +28,10 @@ def on_open_landing(icon, item):
     webbrowser.open("http://127.0.0.1:8000/")
 
 def on_quit(icon, item):
-    backend_process.terminate()
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(backend_process.pid)], capture_output=True)
+    else:
+        backend_process.terminate()
     icon.stop()
 
 # Load logo or generate one

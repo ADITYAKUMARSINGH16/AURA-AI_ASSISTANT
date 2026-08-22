@@ -1,0 +1,12 @@
+{
+    "enabled": true,
+    "cooldown_iterations": 30,
+    "thresholds": {
+        "cpu_percent": 90,
+        "ram_percent": 90,
+        "gpu_temp_c": 85,
+        "cpu_temp_c": 90,
+        "disk_percent": 90,
+        "battery_percent_low": 20
+    }
+}

@@ -409,6 +409,7 @@ let audioCtx = null;
 let analyser = null;
 let source = null;
 let animationId = null;
+let currentAudio = null;
 
 async function playTTS(text) {
     if (!text) return;
@@ -416,13 +417,23 @@ async function playTTS(text) {
     clearInterval(visInterval);
     
     try {
+        await fetch('/api/voice/speaking', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({is_speaking: true})
+        });
+
         const response = await fetch(`/api/tts?text=${encodeURIComponent(text)}`);
         if (!response.ok) throw new Error('TTS fetch failed');
         
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         
+        if (currentAudio) {
+            currentAudio.pause();
+        }
         const audio = new Audio(url);
+        currentAudio = audio;
         
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -450,11 +461,22 @@ async function playTTS(text) {
             });
         }
         
-        audio.onended = () => {
+        audio.onended = async () => {
             cancelAnimationFrame(animationId);
             bars.forEach(bar => bar.style.height = '10%');
             visInterval = setInterval(() => animateVisualizer(false), 100);
             URL.revokeObjectURL(url);
+            currentAudio = null;
+            await fetch('/api/voice/speaking', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({is_speaking: false})
+            });
+            // Check if we should continue conversation
+            if (window._continueConversation) {
+                window._continueConversation = false;
+                voiceBtn.click();
+            }
         };
         
         audio.play();
@@ -463,6 +485,11 @@ async function playTTS(text) {
     } catch (e) {
         console.error("Audio Playback Error:", e);
         visInterval = setInterval(() => animateVisualizer(false), 100);
+        await fetch('/api/voice/speaking', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({is_speaking: false})
+        });
     }
 }
 
@@ -472,16 +499,7 @@ async function playTTS(text) {
 async function appendToTerminal(text, type = 'system') {
     if (!text) return;
     
-    // Terminal Logic
-const inputRow = document.getElementById('command-input');
-inputRow?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.value.trim()) {
-        const cmd = e.target.value.trim();
-        appendTerminal(cmd, 'user');
-        e.target.value = '';
-        processCommand(cmd);
-    }
-}); 
+
     text = text.replace(/\*\*(.*?)\*\*/g, '$1');
     text = text.replace(/(^|\n|\s)\*(?=\s)/g, '$1•');
     text = text.replace(/\*(.*?)\*/g, '$1');
@@ -531,8 +549,70 @@ async function loadHistory() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// COMMAND INPUT & VOICE
+// COMMAND INPUT & VOICE & ATTACHMENTS
 // ═══════════════════════════════════════════════════════════
+
+const btnAttach = document.getElementById('btn-attach');
+const fileUpload = document.getElementById('file-upload');
+const attachmentPreview = document.getElementById('attachment-preview');
+let pendingAttachments = { images: [], file_texts: [] };
+
+if(btnAttach && fileUpload) {
+    btnAttach.addEventListener('click', () => fileUpload.click());
+    
+    fileUpload.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files);
+        for(let file of files) {
+            if(file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const b64 = ev.target.result.split(',')[1];
+                    pendingAttachments.images.push(b64);
+                    rebuildAttachmentPreview();
+                };
+                reader.readAsDataURL(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    pendingAttachments.file_texts.push({ name: file.name, content: ev.target.result });
+                    rebuildAttachmentPreview();
+                };
+                reader.readAsText(file);
+            }
+        }
+        fileUpload.value = ''; // Reset
+    });
+}
+
+function rebuildAttachmentPreview() {
+    if(!attachmentPreview) return;
+    attachmentPreview.innerHTML = '';
+    pendingAttachments.images.forEach((b64, i) => {
+        const pill = document.createElement('div');
+        pill.className = 'attach-pill';
+        pill.innerHTML = `<img src="data:image/jpeg;base64,${b64}"> <span>Image</span> <button class="attach-remove" data-type="image" data-index="${i}">×</button>`;
+        attachmentPreview.appendChild(pill);
+        pill.querySelector('.attach-remove').addEventListener('click', () => {
+            pendingAttachments.images.splice(i, 1);
+            rebuildAttachmentPreview();
+        });
+    });
+    pendingAttachments.file_texts.forEach((fileObj, i) => {
+        const pill = document.createElement('div');
+        pill.className = 'attach-pill';
+        pill.innerHTML = `📄 <span>${fileObj.name}</span> <button class="attach-remove" data-type="text" data-index="${i}">×</button>`;
+        attachmentPreview.appendChild(pill);
+        pill.querySelector('.attach-remove').addEventListener('click', () => {
+            pendingAttachments.file_texts.splice(i, 1);
+            rebuildAttachmentPreview();
+        });
+    });
+}
+
+function clearAttachments() {
+    pendingAttachments = { images: [], file_texts: [] };
+    if(attachmentPreview) attachmentPreview.innerHTML = '';
+}
 commandInput.addEventListener('keypress', async (e) => {
     if (e.key === 'Enter') {
         const text = commandInput.value.trim();
@@ -553,10 +633,17 @@ commandInput.addEventListener('keypress', async (e) => {
         visInterval = setInterval(() => animateVisualizer(true), 100);
 
         try {
+            const payload = { 
+                message: text,
+                images: pendingAttachments.images.length > 0 ? pendingAttachments.images : null,
+                file_texts: pendingAttachments.file_texts.length > 0 ? pendingAttachments.file_texts : null
+            };
+            clearAttachments();
+
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text })
+                body: JSON.stringify(payload)
             });
             const data = await response.json();
             
@@ -582,6 +669,13 @@ commandInput.addEventListener('keypress', async (e) => {
 });
 
 voiceBtn.addEventListener('click', async () => {
+    // If already playing audio, stop it (barge-in)
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.dispatchEvent(new Event('ended')); // Trigger cleanup
+        fetch('/api/voice/stop', { method: 'POST' });
+    }
+
     if (reactorContainer.classList.contains('listening')) return;
     
     reactorContainer.classList.add('listening');
@@ -609,6 +703,7 @@ voiceBtn.addEventListener('click', async () => {
         if (data.status === 'success') {
             if (data.transcription) {
                 await appendToTerminal(data.transcription, 'user');
+                window._continueConversation = data.continue || false;
                 playTTS(data.response);
                 await appendToTerminal(data.response, 'aura');
             } else {
@@ -1622,3 +1717,265 @@ if (video && webcamCanvas) {
     });
 }
 
+
+// -----------------------------------------------------------
+// MEMORY ARCHIVE LOGIC
+// -----------------------------------------------------------
+const memoryList = document.getElementById('memory-list');
+const memorySearch = document.getElementById('memory-search');
+let allMemories = [];
+
+async function fetchMemories() {
+    try {
+        const res = await fetch('/api/memory');
+        if (res.ok) {
+            allMemories = await res.json();
+            renderMemories(allMemories);
+        }
+    } catch (e) { console.error('Error fetching memories:', e); }
+}
+
+function renderMemories(mems) {
+    if (!memoryList) return;
+    memoryList.innerHTML = '';
+    if (mems.length === 0) {
+        memoryList.innerHTML = '<div style="font-size:10px; color:var(--text-dim);">No long-term memories stored.</div>';
+        return;
+    }
+    mems.forEach(mem => {
+        const div = document.createElement('div');
+        div.style.padding = '5px';
+        div.style.borderBottom = '1px solid rgba(0, 240, 255, 0.1)';
+        div.style.marginBottom = '5px';
+        
+        const header = document.createElement('div');
+        header.style.display = 'flex';
+        header.style.justifyContent = 'space-between';
+        header.style.alignItems = 'center';
+        
+        const cat = document.createElement('span');
+        cat.style.fontSize = '8px';
+        cat.style.color = 'var(--cyan-dim)';
+        cat.innerText = mem.category ? mem.category.toUpperCase() : 'GENERAL';
+        
+        const delBtn = document.createElement('button');
+        delBtn.innerText = 'X';
+        delBtn.style.background = 'none';
+        delBtn.style.border = 'none';
+        delBtn.style.color = 'var(--error)';
+        delBtn.style.cursor = 'pointer';
+        delBtn.style.fontSize = '10px';
+        delBtn.onclick = async () => {
+            try {
+                const res = await fetch(`/api/memory/${mem.id}`, { method: 'DELETE' });
+                if(res.ok) fetchMemories();
+            } catch(e) {}
+        };
+        
+        header.appendChild(cat);
+        header.appendChild(delBtn);
+        
+        const content = document.createElement('div');
+        content.style.fontSize = '10px';
+        content.style.marginTop = '4px';
+        content.style.color = 'var(--text-main)';
+        content.innerText = mem.content;
+        
+        div.appendChild(header);
+        div.appendChild(content);
+        memoryList.appendChild(div);
+    });
+}
+
+if (memorySearch) {
+    memorySearch.addEventListener('input', (e) => {
+        const term = e.target.value.toLowerCase();
+        const filtered = allMemories.filter(m => m.content.toLowerCase().includes(term) || (m.category && m.category.toLowerCase().includes(term)));
+        renderMemories(filtered);
+    });
+}
+fetchMemories();
+
+// -----------------------------------------------------------
+// PROACTIVE INTELLIGENCE LOGIC
+// -----------------------------------------------------------
+const toggleProactive = document.getElementById('toggle-proactive');
+const threshCpu = document.getElementById('thresh-cpu');
+const threshCpuVal = document.getElementById('thresh-cpu-val');
+const threshGpu = document.getElementById('thresh-gpu');
+const threshGpuVal = document.getElementById('thresh-gpu-val');
+const threshBatt = document.getElementById('thresh-batt');
+const threshBattVal = document.getElementById('thresh-batt-val');
+const btnSaveProactive = document.getElementById('btn-save-proactive');
+
+let proactiveEnabled = true;
+
+async function fetchProactiveConfig() {
+    try {
+        const res = await fetch('/api/proactive');
+        if (res.ok) {
+            const config = await res.json();
+            proactiveEnabled = config.enabled !== false;
+            if(toggleProactive) {
+                toggleProactive.innerText = proactiveEnabled ? 'ON' : 'OFF';
+                toggleProactive.style.color = proactiveEnabled ? 'var(--cyan)' : 'var(--text-dim)';
+            }
+            
+            if (config.thresholds) {
+                if (config.thresholds.cpu_percent && threshCpu) {
+                    threshCpu.value = config.thresholds.cpu_percent;
+                    threshCpuVal.innerText = config.thresholds.cpu_percent + '%';
+                }
+                if (config.thresholds.gpu_temp_c && threshGpu) {
+                    threshGpu.value = config.thresholds.gpu_temp_c;
+                    threshGpuVal.innerText = config.thresholds.gpu_temp_c + '°C';
+                }
+                if (config.thresholds.battery_percent_low && threshBatt) {
+                    threshBatt.value = config.thresholds.battery_percent_low;
+                    threshBattVal.innerText = config.thresholds.battery_percent_low + '%';
+                }
+            }
+        }
+    } catch(e) {}
+}
+
+if (threshCpu) threshCpu.addEventListener('input', e => threshCpuVal.innerText = e.target.value + '%');
+if (threshGpu) threshGpu.addEventListener('input', e => threshGpuVal.innerText = e.target.value + '°C');
+if (threshBatt) threshBatt.addEventListener('input', e => threshBattVal.innerText = e.target.value + '%');
+
+if (toggleProactive) {
+    toggleProactive.addEventListener('click', () => {
+        proactiveEnabled = !proactiveEnabled;
+        toggleProactive.innerText = proactiveEnabled ? 'ON' : 'OFF';
+        toggleProactive.style.color = proactiveEnabled ? 'var(--cyan)' : 'var(--text-dim)';
+    });
+}
+
+if (btnSaveProactive) {
+    btnSaveProactive.addEventListener('click', async () => {
+        const payload = {
+            enabled: proactiveEnabled,
+            thresholds: {
+                cpu_percent: parseInt(threshCpu.value),
+                gpu_temp_c: parseInt(threshGpu.value),
+                battery_percent_low: parseInt(threshBatt.value),
+                ram_percent: 90,
+                disk_percent: 90,
+                cpu_temp_c: 90
+            }
+        };
+        try {
+            const res = await fetch('/api/proactive', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                btnSaveProactive.innerText = 'SAVED!';
+                setTimeout(() => btnSaveProactive.innerText = 'SAVE CONFIG', 2000);
+            }
+        } catch(e) {}
+    });
+}
+fetchProactiveConfig();
+
+// ---------------------------------------------------------
+// LOCAL SECURITY CENTER
+// ---------------------------------------------------------
+async function fetchSecurity() {
+    try {
+        const res = await fetch('/api/security');
+        const data = await res.json();
+        if (data.status === 'success') {
+            const riskEl = document.getElementById('sec-risk-val');
+            riskEl.innerText = data.risk_level;
+            if (data.risk_level === 'LOW') {
+                riskEl.style.color = 'var(--green)';
+            } else if (data.risk_level === 'MEDIUM') {
+                riskEl.style.color = 'var(--warning)';
+            } else {
+                riskEl.style.color = 'var(--error)';
+            }
+            
+            const alertsEl = document.getElementById('sec-alerts-container');
+            alertsEl.innerHTML = '';
+            if (data.alerts && data.alerts.length > 0) {
+                data.alerts.forEach(alert => {
+                    const d = document.createElement('div');
+                    d.style.color = 'var(--error)';
+                    d.style.fontSize = '10px';
+                    d.style.marginBottom = '2px';
+                    d.innerText = `[!] ${alert}`;
+                    alertsEl.appendChild(d);
+                });
+            } else {
+                alertsEl.innerHTML = '<div style="color:var(--green);font-size:10px;">[+] No critical alerts</div>';
+            }
+            
+            const detailsEl = document.getElementById('sec-details-container');
+            let details = '';
+            if (data.defender) details += data.defender + '\n\n';
+            if (data.firewall) details += data.firewall + '\n\n';
+            if (data.processes) details += data.processes + '\n\n';
+            if (data.files) details += data.files + '\n\n';
+            if (data.ports) details += data.ports + '\n\n';
+            if (data.devices) details += data.devices + '\n\n';
+            
+            detailsEl.innerText = details.trim();
+        }
+    } catch (err) {
+        console.error("Security fetch error:", err);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    fetchSecurity();
+    setInterval(fetchSecurity, 30000); // 30s
+
+
+    
+    const btnSec = document.getElementById('btn-sec-refresh');
+    if (btnSec) {
+        btnSec.addEventListener('click', () => {
+            const detailsEl = document.getElementById('sec-details-container');
+            if(detailsEl) detailsEl.innerText = 'Scanning...';
+            fetchSecurity();
+        });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════
+// SYSTEM LOGS VIEWER
+// ═══════════════════════════════════════════════════════════
+const logOutput = document.getElementById('log-output');
+const btnLogRefresh = document.getElementById('btn-log-refresh');
+
+async function fetchLogs() {
+    if (!logOutput) return;
+    try {
+        const res = await fetch('/api/logs');
+        const data = await res.json();
+        if (data.status === 'success' && data.lines) {
+            logOutput.innerHTML = '';
+            data.lines.forEach(line => {
+                const div = document.createElement('div');
+                div.className = 'log-line';
+                div.textContent = line;
+                logOutput.appendChild(div);
+            });
+            logOutput.scrollTop = logOutput.scrollHeight;
+        } else {
+            logOutput.innerHTML = `<div class="log-line" style="color:var(--red);">[ERROR] Failed to read logs.</div>`;
+        }
+    } catch (e) {
+        logOutput.innerHTML = `<div class="log-line" style="color:var(--red);">[ERROR] Connection failed.</div>`;
+    }
+}
+
+if (btnLogRefresh) {
+    btnLogRefresh.addEventListener('click', fetchLogs);
+}
+
+// Auto-refresh logs every 3 seconds
+setInterval(fetchLogs, 3000);
+fetchLogs();

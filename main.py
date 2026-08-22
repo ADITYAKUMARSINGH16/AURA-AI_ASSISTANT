@@ -9,11 +9,11 @@ from config import OLLAMA_MODEL
 from voice import speak, listen
 
 def main():
-    print(f"Initializing JARVIS (Model: {OLLAMA_MODEL})...")
+    print(f"Initializing AURA (Model: {OLLAMA_MODEL})...")
     
     try:
         chat = create_agent()
-        print("\nJARVIS is online. Type 'exit' or 'quit' to end the session.")
+        print("\nAURA is online. Type 'exit' or 'quit' to end the session.")
         
         mode = input("Select mode (text/voice) [text]: ").strip().lower()
         if not mode:
@@ -47,11 +47,11 @@ def main():
                 response = chat.send_message(user_input)
                 speak(response)
             except Exception as e:
-                print(f"\nJARVIS [Error]: I'm sorry, I encountered an issue communicating with Ollama: {str(e)}")
+                print(f"\nAURA [Error]: I'm sorry, I encountered an issue communicating with Ollama: {str(e)}")
                 print(f"Make sure Ollama is running and the model '{OLLAMA_MODEL}' is downloaded.")
                 
     except Exception as e:
-        print(f"Failed to initialize JARVIS: {str(e)}")
+        print(f"Failed to initialize AURA: {str(e)}")
 
 if __name__ == "__main__":
     main()

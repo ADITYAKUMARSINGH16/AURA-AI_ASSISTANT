@@ -155,7 +155,14 @@
                     <!-- Chat bubbles injected here -->
                 </div>
 
+                <div id="attachment-preview" class="attachment-preview"></div>
                 <div class="terminal-input-row">
+                    <button id="btn-attach" class="btn-attach" title="Attach file or image">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                        </svg>
+                    </button>
+                    <input type="file" id="file-upload" accept="image/*,.txt,.md,.py,.json,.csv,.js,.css,.html" multiple style="display: none;">
                     <span class="prompt">></span>
                     <input type="text" id="command-input" placeholder="Enter command..." autocomplete="off">
                 </div>
@@ -177,6 +184,20 @@
                     <canvas id="webcam-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;"></canvas>
                     <div style="position: absolute; top: 5px; left: 5px; color: var(--cyan); font-size: 8px; z-index: 20; background: rgba(0,0,0,0.5); padding: 2px;">REC // SENSOR 01</div>
                 </div>
+            </div>
+
+            <!-- SECURITY CENTER -->
+            <div class="panel security-panel" draggable="true">
+                <div class="panel-header drag-handle" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>LOCAL SECURITY CENTER</span>
+                    <button class="qa-btn" id="btn-sec-refresh" style="padding: 2px 5px; min-height: 18px; font-size: 9px; width: auto;">REFRESH</button>
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom:5px;">
+                    <div class="diag-label"><span>RISK LEVEL</span><span id="sec-risk-val" style="color: var(--cyan);">LOW</span></div>
+                </div>
+                <div id="sec-alerts-container" style="margin-bottom: 8px;">
+                </div>
+                <div style="font-size: 10px; color: var(--text-dim); max-height: 100px; overflow-y: auto; font-family: var(--font-mono); white-space: pre-wrap;" id="sec-details-container">Initializing security sweep...</div>
             </div>
 
             <!-- CYBER-DECK FILE EXPLORER -->
@@ -277,6 +298,17 @@
                 </div>
             </div>
 
+            <!-- System Logs Panel -->
+            <div class="panel log-panel" draggable="true" id="panel-logs">
+                <div class="panel-header drag-handle" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>SYSTEM LOGS</span>
+                    <button class="qa-btn" id="btn-log-refresh" style="padding: 2px 5px; min-height: 18px; font-size: 9px; width: auto;">REFRESH</button>
+                </div>
+                <div class="log-output" id="log-output">
+                    <!-- Logs populate here -->
+                </div>
+            </div>
+
             <!-- Network Grid Panel -->
             <div class="panel network-panel" draggable="true">
                 <div class="panel-header drag-handle" style="display: flex; justify-content: space-between; align-items: center;">
@@ -298,6 +330,28 @@
                 <div class="module-item mod-btn" id="mod-schedule"><span>SCHEDULE AI</span><span class="status-active">ACTIVE</span></div>
                 <div class="module-item mod-btn" id="mod-home"><span>HOME GRID</span><span class="status-active">ACTIVE</span></div>
                 <div class="module-item mod-btn" id="mod-archive"><span>ARCHIVE</span><span class="status-sync">SYNCING</span></div>
+            </div>
+
+            <!-- PROACTIVE INTELLIGENCE PANEL -->
+            <div class="panel proactive-panel" draggable="true">
+                <div class="panel-header drag-handle">PROACTIVE INTELLIGENCE</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-size:10px; color:var(--cyan);">MONITORING ENGINE</span>
+                    <button id="toggle-proactive" class="qa-btn" style="padding: 2px 5px; min-height:18px; width:auto; font-size:9px;">ON</button>
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom:5px;">
+                    <div class="diag-label"><span>CPU LIMIT</span><span id="thresh-cpu-val">90%</span></div>
+                    <input type="range" id="thresh-cpu" min="50" max="100" value="90" style="width:100%;">
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom:5px;">
+                    <div class="diag-label"><span>GPU TEMP</span><span id="thresh-gpu-val">85°C</span></div>
+                    <input type="range" id="thresh-gpu" min="50" max="100" value="85" style="width:100%;">
+                </div>
+                <div class="diag-item" style="border:none; margin-bottom:5px;">
+                    <div class="diag-label"><span>BATT MIN</span><span id="thresh-batt-val">20%</span></div>
+                    <input type="range" id="thresh-batt" min="5" max="50" value="20" style="width:100%;">
+                </div>
+                <button id="btn-save-proactive" class="qa-btn" style="width:100%; margin-top:5px;">SAVE CONFIG</button>
             </div>
 
             <div class="panel quick-actions-panel" draggable="true">

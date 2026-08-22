@@ -12,7 +12,6 @@ pydantic
 pyperclip
 pyautogui
 Pillow
-pytesseract
 wmi
 pypiwin32
 edge-tts

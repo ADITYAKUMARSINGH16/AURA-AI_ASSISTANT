@@ -20,9 +20,25 @@ import asyncio
 #   en-IN-PrabhatNeural   - Male, Indian English
 
 EDGE_TTS_VOICE = "en-US-GuyNeural"
+EDGE_TTS_RATE = "+0%"
 
 _TEMP_DIR = tempfile.gettempdir()
 _TTS_PATH = os.path.join(_TEMP_DIR, "aura_tts_output.mp3")
+
+# Global state to prevent self-triggering and allow barge-in
+is_speaking = False
+
+def stop_speaking():
+    """Immediately halts TTS playback if active."""
+    global is_speaking
+    is_speaking = False
+    try:
+        import pygame
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
+    except Exception:
+        pass
+
 
 # ──────────── Detect available TTS engine ────────────
 _use_edge_tts = False
@@ -105,7 +121,7 @@ def _speak_edge_tts(text: str):
     import edge_tts
 
     async def _synth():
-        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE, rate=EDGE_TTS_RATE)
         await communicate.save(_TTS_PATH)
 
     # Handle asyncio event loop safely
@@ -137,26 +153,35 @@ def _run_in_new_loop(coro):
 
 def _play_mp3(filepath: str):
     """Play an mp3 file."""
+    global is_speaking
+    is_speaking = True
     try:
         import pygame
         pygame.mixer.init()
         pygame.mixer.music.load(filepath)
         pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
+        while pygame.mixer.music.get_busy() and is_speaking:
             pygame.time.wait(100)
+        pygame.mixer.music.stop()
         pygame.mixer.quit()
     except ImportError:
         # Fallback: Windows media player (silent window)
         os.system(f'start /min /wait "" "{filepath}"')
+    finally:
+        is_speaking = False
 
 
 def _speak_pyttsx3(text: str):
     """Offline TTS via pyttsx3 (fallback)."""
+    global is_speaking
+    is_speaking = True
     try:
         _pyttsx3_engine.say(text)
         _pyttsx3_engine.runAndWait()
     except Exception:
         pass
+    finally:
+        is_speaking = False
 
 
 def listen(max_duration=15, fs=16000) -> str:
@@ -240,9 +265,9 @@ def start_wakeword_listener(callback):
             RATE = 16000
             CHUNK = 1280
             
-            owwModel = Model(wakeword_models=['hey_jarvis'], inference_framework='onnx')
+            owwModel = Model(wakeword_models=['hey_aura'], inference_framework='onnx')
             
-            print('[WAKE WORD] Listening for "Hey Jarvis"...')
+            print('[WAKE WORD] Listening for "Hey Aura"...')
             
             def audio_callback(indata, frames, time, status):
                 if status:
@@ -254,8 +279,14 @@ def start_wakeword_listener(callback):
                 prediction = owwModel.predict(audio_data)
                 
                 for mdl, score in prediction.items():
-                    if score > 0.5:
+                    # Increase threshold if AURA is speaking to prevent self-triggering,
+                    # but still allow loud/close "Hey AURA" to interrupt (barge-in).
+                    threshold = 0.8 if is_speaking else 0.5
+                    if score > threshold:
                         print(f'[WAKE WORD] Detected {mdl} with score {score}')
+                        if is_speaking:
+                            print('[WAKE WORD] Barge-in detected! Stopping TTS...')
+                            stop_speaking()
                         callback()
                         owwModel.reset()
             

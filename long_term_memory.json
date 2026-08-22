@@ -1,3 +1,58 @@
-{
-    "user_name": "Aditya"
-}
+[
+    {
+        "id": "25d3680c-c7c4-4f93-98f4-8139b48b509a",
+        "category": "important information",
+        "content": "user_name: Aditya",
+        "importance": 5,
+        "timestamp": "2026-08-22T14:01:01.216020"
+    },
+    {
+        "category": "preferences",
+        "content": "Favorite programming language is Rust.",
+        "importance": 7,
+        "id": "796cafae-8924-4365-bc74-df50f9582cf4",
+        "timestamp": "2026-08-22T14:01:01.216196"
+    },
+    {
+        "category": "important information",
+        "content": "The user is interacting with a system known as the 'Tactical AI Assistant' named AURA.",
+        "importance": 8,
+        "id": "5400cb41-c2f0-46ce-abdd-7bb1695135a2",
+        "timestamp": "2026-08-22T15:34:46.325677"
+    },
+    {
+        "category": "important information",
+        "content": "The system currently displays a live operational view of the AURA AI system, including system metrics (CPU, GPU temperature, Battery level) and log history.",
+        "importance": 6,
+        "id": "4d808c83-1025-44e5-8f17-05cd8e759213",
+        "timestamp": "2026-08-22T15:34:46.325704"
+    },
+    {
+        "category": "projects",
+        "content": "User is actively working on a project named 'AURA-AI-ASSISTANT' using an 'Antigravity IDE' and interacting with the AURA system.",
+        "importance": 9,
+        "id": "08a3bf3b-6a82-471c-b9ca-183f28d23023",
+        "timestamp": "2026-08-22T16:06:05.001806"
+    },
+    {
+        "category": "important information",
+        "content": "The user utilizes a system referred to as 'AURA' for coding, system management, and AI assistance.",
+        "importance": 10,
+        "id": "b02ad1ec-0798-49b4-88c8-88788b4bc050",
+        "timestamp": "2026-08-22T16:06:05.001925"
+    },
+    {
+        "category": "preferences",
+        "content": "The user operates in a dark theme environment.",
+        "importance": 6,
+        "id": "f8787aaa-a2ce-4ffc-b269-a42146f4a320",
+        "timestamp": "2026-08-22T16:06:05.001990"
+    },
+    {
+        "category": "recurring tasks",
+        "content": "The user engages in tasks related to API integration, system setup (server/browser subagent), and UI connectivity testing.",
+        "importance": 8,
+        "id": "b5e9673e-140d-4375-a6dd-6de28ec33030",
+        "timestamp": "2026-08-22T16:06:05.002066"
+    }
+]

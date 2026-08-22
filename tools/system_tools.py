@@ -79,41 +79,44 @@ def control_system_power(action: str) -> str:
     except Exception as e:
         return f"Error executing power control: {str(e)}"
 
-def read_screen() -> str:
-    """Takes a screenshot of the current screen and reads the text from it using OCR."""
+def read_screen(prompt: str = "Describe what is on this screen in detail, including any text, UI elements, or applications you see.") -> str:
+    """Takes a screenshot of the current screen and analyzes it using a local vision model. You can specify a prompt to ask specific questions about the screen."""
     try:
         from PIL import ImageGrab
-        import pytesseract
         import os
+        import io
+        import base64
+        import ollama
+        from config import OLLAMA_MODEL
         
-        # Explicitly set the tesseract path for Windows silent installs
-        tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-        if os.path.exists(tesseract_path):
-            pytesseract.pytesseract.tesseract_cmd = tesseract_path
-            pytesseract.tesseract_cmd = tesseract_path
-            
         # Grab screenshot
         screenshot = ImageGrab.grab()
         
-        # Save screenshot for HUD
+        # Save original screenshot for HUD
         capture_dir = os.path.join("static", "captures")
         if not os.path.exists(capture_dir):
             os.makedirs(capture_dir)
         screenshot.save(os.path.join(capture_dir, "last_screen.png"))
         
-        # Read text
-        text = pytesseract.image_to_string(screenshot)
+        # Optimize image for the vision model (convert to RGB, resize, JPEG)
+        img_opt = screenshot.convert("RGB")
+        img_opt.thumbnail((1280, 1280))
         
-        if not text.strip():
-            return "No text could be read from the screen."
+        img_byte_arr = io.BytesIO()
+        img_opt.save(img_byte_arr, format='JPEG', quality=85)
+        img_bytes = img_byte_arr.getvalue()
         
-        return text
+        # Base64 encode the image
+        b64_str = base64.b64encode(img_bytes).decode('utf-8')
+        
+        # Analyze with internal vision pipeline
+        from vision import analyze_vision_payload
+        return analyze_vision_payload(b64_str, user_prompt=prompt)
+        
     except ImportError as e:
-        return f"Missing dependency for screen reading: {str(e)}. Make sure Pillow and pytesseract are installed."
+        return f"Missing dependency for screen reading: {str(e)}. Make sure Pillow and ollama are installed."
     except Exception as e:
-        if "tesseract is not installed or it's not in your PATH" in str(e):
-            return "Error: Tesseract-OCR software is not installed or not in PATH. Please install Tesseract-OCR for Windows."
-        return f"Error reading screen: {str(e)}"
+        return f"Error reading screen with vision model: {str(e)}"
 
 def run_threat_scan() -> str:
     """Runs a basic security threat scan on the system by checking top resource consuming processes."""
