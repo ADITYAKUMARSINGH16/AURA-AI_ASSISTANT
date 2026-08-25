@@ -4,6 +4,8 @@
 // ═══════════════════════════════════════════════════════════
 
 const startTime = Date.now();
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
 
 // ═══════════════════════════════════════════════════════════
 // MODULE 1: CINEMATIC BOOT OVERLAY
@@ -61,7 +63,10 @@ const startTime = Date.now();
         document.querySelectorAll('.hud-overlay').forEach(el => el.classList.add('visible'));
     }
 
-    document.addEventListener('keydown', dismiss, { once: true });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') return; // don't hijack keyboard navigation
+        dismiss();
+    }, { once: true });
     overlay.addEventListener('click', dismiss, { once: true });
 
     // Auto-dismiss after 7 seconds
@@ -70,10 +75,41 @@ const startTime = Date.now();
 
 
 // ═══════════════════════════════════════════════════════════
+// PERF: VISIBILITY-GATED ANIMATION LOOPS
+// Decorative RAF loops (shader bg, globe, orbit particles) keep
+// burning GPU even when off-screen or the tab is hidden. This
+// helper pauses/resumes them automatically.
+// ═══════════════════════════════════════════════════════════
+function visibleLoop(el, loopFn) {
+    let running = false;
+    let intersecting = true; // IO default before first callback
+
+    const tick = () => {
+        if (!running) return;
+        loopFn();
+        requestAnimationFrame(tick);
+    };
+    const start = () => { if (!running) { running = true; tick(); } };
+    const stop = () => { running = false; };
+    const sync = () => { (!document.hidden && intersecting) ? start() : stop(); };
+
+    if ('IntersectionObserver' in window && el !== document.body) {
+        new IntersectionObserver((entries) => {
+            intersecting = entries[0].isIntersecting;
+            sync();
+        }, { rootMargin: '80px' }).observe(el);
+    }
+    document.addEventListener('visibilitychange', sync);
+    sync();
+}
+
+
+// ═══════════════════════════════════════════════════════════
 // MODULE 2: CUSTOM CURSOR + TRAIL
 // ═══════════════════════════════════════════════════════════
 (function customCursor() {
     const dot = document.getElementById('cursor-dot');
+    if (!dot || REDUCED_MOTION || COARSE_POINTER) return;
     const ring = document.getElementById('cursor-ring');
     const trailCanvas = document.getElementById('cursor-trail');
     const ctx = trailCanvas.getContext('2d');
@@ -148,6 +184,7 @@ const startTime = Date.now();
 // MODULE 3: WEBGL SHADER BACKGROUND
 // ═══════════════════════════════════════════════════════════
 (function shaderBackground() {
+    if (REDUCED_MOTION) return;
     const canvas = document.getElementById('shader-bg');
     const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
     if (!gl) return;
@@ -250,13 +287,11 @@ const startTime = Date.now();
     const timeLoc = gl.getUniformLocation(prog, 'u_time');
     const resLoc = gl.getUniformLocation(prog, 'u_res');
 
-    function render(t) {
-        gl.uniform1f(timeLoc, t * 0.001);
+    visibleLoop(document.body, () => {
+        gl.uniform1f(timeLoc, performance.now() * 0.001);
         gl.uniform2f(resLoc, canvas.width, canvas.height);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-        requestAnimationFrame(render);
-    }
-    requestAnimationFrame(render);
+    });
 })();
 
 
@@ -296,39 +331,35 @@ const SFX = (function soundEffects() {
     function error() { playTone(200, 0.3, 'sawtooth', 0.03); }
 
     // Ambient hum
-    let ambientOsc = null;
-    let ambientGain = null;
+    let ambientNodes = [];
 
     function startAmbient() {
         if (!ctx) return;
-        ambientOsc = ctx.createOscillator();
-        ambientGain = ctx.createGain();
-        ambientOsc.type = 'sine';
-        ambientOsc.frequency.value = 60;
-        ambientGain.gain.value = 0.008;
-        ambientOsc.connect(ambientGain);
-        ambientGain.connect(ctx.destination);
-        ambientOsc.start();
-
-        // Add second harmonic
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.type = 'sine';
-        osc2.frequency.value = 120;
-        gain2.gain.value = 0.004;
-        osc2.connect(gain2);
-        gain2.connect(ctx.destination);
-        osc2.start();
+        ambientNodes.forEach(n => { try { n.stop(); } catch (e) {} });
+        ambientNodes = [];
+        [[60, 0.008], [120, 0.004]].forEach(([freq, vol]) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.value = vol;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            ambientNodes.push(osc);
+        });
     }
 
     function stopAmbient() {
-        if (ambientOsc) { ambientOsc.stop(); ambientOsc = null; }
+        ambientNodes.forEach(n => { try { n.stop(); } catch (e) {} });
+        ambientNodes = [];
     }
 
     toggleBtn.addEventListener('click', () => {
         initCtx();
         enabled = !enabled;
         toggleBtn.classList.toggle('active', enabled);
+        toggleBtn.setAttribute('aria-pressed', String(enabled));
         iconOn.style.display = enabled ? 'block' : 'none';
         iconOff.style.display = enabled ? 'none' : 'block';
 
@@ -379,7 +410,7 @@ const SFX = (function soundEffects() {
             link.classList.remove('active');
             if (link.getAttribute('href') === `#${current}`) link.classList.add('active');
         });
-    });
+    }, { passive: true });
 
     navLinks.forEach(link => {
         link.addEventListener('click', (e) => {
@@ -392,22 +423,10 @@ const SFX = (function soundEffects() {
 
 
 // ═══════════════════════════════════════════════════════════
-// MODULE 6: SCROLL REVEAL
+// MODULE 6: SCROLL REVEAL — merged into Module 16, which owns
+// the [data-reveal] system used by this page (and triggers the
+// spec counter animation when the specs grid scrolls into view)
 // ═══════════════════════════════════════════════════════════
-(function scrollReveal() {
-    const revealElements = document.querySelectorAll('.reveal');
-
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('visible');
-                if (entry.target.classList.contains('specs-grid')) animateSpecs();
-            }
-        });
-    }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
-
-    revealElements.forEach(el => observer.observe(el));
-})();
 
 
 // ═══════════════════════════════════════════════════════════
@@ -471,6 +490,7 @@ const SFX = (function soundEffects() {
     const body = document.getElementById('terminal-body');
     const input = document.getElementById('terminal-input');
     let bootStarted = false;
+    let autoTyped = false;
 
     // Boot sequence
     const bootSeq = [
@@ -492,7 +512,11 @@ const SFX = (function soundEffects() {
     let bIdx = 0;
 
     function runBoot() {
-        if (bIdx >= bootSeq.length) { input.focus(); return; }
+        if (bIdx >= bootSeq.length) {
+            // No focus steal — hijacking focus while the visitor reads mid-page is jarring
+            autoTypeCommand('status', 800);
+            return;
+        }
         const step = bootSeq[bIdx];
         const line = document.createElement('div');
         line.className = `terminal-line ${step.cls || ''}`;
@@ -502,6 +526,28 @@ const SFX = (function soundEffects() {
         SFX.bootBeep();
         bIdx++;
         setTimeout(runBoot, step.delay);
+    }
+
+    function autoTypeCommand(cmdText, delay = 800) {
+        if (autoTyped) return;
+        autoTyped = true;
+        setTimeout(() => {
+            let i = 0;
+            input.value = '';
+            const typeTimer = setInterval(() => {
+                if (i < cmdText.length) {
+                    input.value += cmdText[i];
+                    SFX.keypress();
+                    i++;
+                } else {
+                    clearInterval(typeTimer);
+                    setTimeout(() => {
+                        executeCommand(cmdText);
+                        input.value = '';
+                    }, 300);
+                }
+            }, 80);
+        }, delay);
     }
 
     const termObserver = new IntersectionObserver((entries) => {
@@ -596,48 +642,51 @@ const SFX = (function soundEffects() {
         ],
     };
 
+    function executeCommand(rawCmd) {
+        const cmd = rawCmd.trim().toLowerCase();
+        if (!cmd) return;
+
+        // Echo command
+        const echo = document.createElement('div');
+        echo.className = 'terminal-line command';
+        echo.textContent = `> ${cmd}`;
+        body.appendChild(echo);
+
+        SFX.keypress();
+
+        if (cmd === 'clear') {
+            body.innerHTML = '';
+            return;
+        }
+
+        const handler = commands[cmd];
+        if (handler) {
+            const lines = handler();
+            lines.forEach((l, i) => {
+                setTimeout(() => {
+                    const div = document.createElement('div');
+                    div.className = `terminal-line ${l.cls || ''}`;
+                    div.textContent = l.text;
+                    body.appendChild(div);
+                    body.scrollTop = body.scrollHeight;
+                }, i * 60);
+            });
+            SFX.success();
+        } else {
+            const errLine = document.createElement('div');
+            errLine.className = 'terminal-line error';
+            errLine.textContent = `  Unknown command: "${cmd}". Type "help" for available commands.`;
+            body.appendChild(errLine);
+            SFX.error();
+        }
+
+        body.scrollTop = body.scrollHeight;
+    }
+
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-            const cmd = input.value.trim().toLowerCase();
+            executeCommand(input.value);
             input.value = '';
-
-            if (!cmd) return;
-
-            // Echo command
-            const echo = document.createElement('div');
-            echo.className = 'terminal-line command';
-            echo.textContent = `> ${cmd}`;
-            body.appendChild(echo);
-
-            SFX.keypress();
-
-            if (cmd === 'clear') {
-                body.innerHTML = '';
-                return;
-            }
-
-            const handler = commands[cmd];
-            if (handler) {
-                const lines = handler();
-                lines.forEach((l, i) => {
-                    setTimeout(() => {
-                        const div = document.createElement('div');
-                        div.className = `terminal-line ${l.cls || ''}`;
-                        div.textContent = l.text;
-                        body.appendChild(div);
-                        body.scrollTop = body.scrollHeight;
-                    }, i * 60);
-                });
-                SFX.success();
-            } else {
-                const errLine = document.createElement('div');
-                errLine.className = 'terminal-line error';
-                errLine.textContent = `  Unknown command: "${cmd}". Type "help" for available commands.`;
-                body.appendChild(errLine);
-                SFX.error();
-            }
-
-            body.scrollTop = body.scrollHeight;
         }
     });
 
@@ -651,7 +700,8 @@ const SFX = (function soundEffects() {
 // ═══════════════════════════════════════════════════════════
 (function globe3D() {
     const canvas = document.getElementById('globe-canvas');
-    if (!window.THREE) return;
+    if (!window.THREE || !canvas) return;
+    if (REDUCED_MOTION) return;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
@@ -737,7 +787,7 @@ const SFX = (function soundEffects() {
     // Pulse nodes
     let time = 0;
 
-    function animate() {
+    visibleLoop(canvas, () => {
         time += 0.005;
         sphere.rotation.y += 0.002;
         sphere.rotation.y += mouseX * 0.005;
@@ -753,9 +803,7 @@ const SFX = (function soundEffects() {
         });
 
         renderer.render(scene, camera);
-        requestAnimationFrame(animate);
-    }
-    animate();
+    });
 
     // Resize
     window.addEventListener('resize', () => {
@@ -775,33 +823,59 @@ const SFX = (function soundEffects() {
     const latEl = document.getElementById('hud-lat');
     const lngEl = document.getElementById('hud-lng');
     const sigEl = document.getElementById('hud-sig-val');
-    const threatEl = document.getElementById('hud-threat-val');
     const clockEl = document.getElementById('hud-sys-clock');
     const uptimeEl = document.getElementById('hud-uptime');
 
+    // Fallback base: Delhi sector. Replaced by real coordinates if geolocation is granted.
     let baseLat = 28.6139, baseLng = 77.2090;
+    let latHemi = 'N', lngHemi = 'E';
+
+    function fmtCoord(value, hemi) {
+        return Math.abs(value).toFixed(4) + '° ' + hemi;
+    }
+
+    // Ask once; drift animation continues around whichever base we end up with
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((pos) => {
+            baseLat = pos.coords.latitude;
+            baseLng = pos.coords.longitude;
+            latHemi = baseLat >= 0 ? 'N' : 'S';
+            lngHemi = baseLng >= 0 ? 'E' : 'W';
+            if (latEl) latEl.textContent = fmtCoord(baseLat, latHemi);
+            if (lngEl) lngEl.textContent = fmtCoord(baseLng, lngHemi);
+        }, () => { /* permission denied — keep fallback coords */ }, { timeout: 8000 });
+    } else {
+        if (latEl) latEl.textContent = fmtCoord(baseLat, latHemi);
+        if (lngEl) lngEl.textContent = fmtCoord(baseLng, lngHemi);
+    }
 
     function update() {
         // Coordinates drift
         baseLat += (Math.random() - 0.5) * 0.0001;
         baseLng += (Math.random() - 0.5) * 0.0001;
-        latEl.textContent = baseLat.toFixed(4) + '° N';
-        lngEl.textContent = baseLng.toFixed(4) + '° E';
+        if (latEl) latEl.textContent = fmtCoord(baseLat, latHemi);
+        if (lngEl) lngEl.textContent = fmtCoord(baseLng, lngHemi);
 
         // Signal
-        const sig = Math.floor(82 + Math.random() * 16);
-        sigEl.textContent = sig + '%';
+        if (sigEl) {
+            const sig = Math.floor(82 + Math.random() * 16);
+            sigEl.textContent = sig + '%';
+        }
 
         // Clock
-        const now = new Date();
-        clockEl.textContent = now.toLocaleTimeString('en-US', { hour12: false });
+        if (clockEl) {
+            const now = new Date();
+            clockEl.textContent = now.toLocaleTimeString('en-US', { hour12: false });
+        }
 
         // Uptime
-        const uptime = Math.floor((Date.now() - startTime) / 1000);
-        const h = Math.floor(uptime / 3600);
-        const m = Math.floor((uptime % 3600) / 60);
-        const s = uptime % 60;
-        uptimeEl.textContent = `UPTIME: ${h}h ${m}m ${s}s`;
+        if (uptimeEl) {
+            const uptime = Math.floor((Date.now() - startTime) / 1000);
+            const h = Math.floor(uptime / 3600);
+            const m = Math.floor((uptime % 3600) / 60);
+            const s = uptime % 60;
+            uptimeEl.textContent = `UPTIME: ${h}h ${m}m ${s}s`;
+        }
     }
 
     setInterval(update, 1000);
@@ -862,30 +936,74 @@ function animateSpecs() {
     }
 
     autoInterval = setInterval(() => goTo(current + 1), 5000);
+
+    // Pause autoplay while the visitor is interacting with the carousel
+    const wrap = track.closest('.carousel-wrap');
+    if (wrap) {
+        wrap.addEventListener('mouseenter', () => clearInterval(autoInterval));
+        wrap.addEventListener('mouseleave', resetAuto);
+        wrap.addEventListener('focusin', () => clearInterval(autoInterval));
+        wrap.addEventListener('focusout', resetAuto);
+    }
 })();
 
 
 // ═══════════════════════════════════════════════════════════
-// MODULE 13: HERO PARALLAX
+// MODULE 13: 3D HERO PARALLAX TILT & LAYERED ORB PARALLAX
 // ═══════════════════════════════════════════════════════════
 (function heroParallax() {
-    const heroLogo = document.getElementById('hero-logo');
+    const heroContent = document.querySelector('.hero-content');
     const heroSection = document.getElementById('hero');
+    if (!heroSection || !heroContent || REDUCED_MOTION) return;
 
-    if (heroSection && heroLogo) {
-        heroSection.addEventListener('mousemove', (e) => {
-            const rect = heroSection.getBoundingClientRect();
-            const x = (e.clientX - rect.left) / rect.width - 0.5;
-            const y = (e.clientY - rect.top) / rect.height - 0.5;
-            heroLogo.style.transform = `translate(${x * 8}px, ${y * 8}px)`;
+    let targetRotX = 0, targetRotY = 0;
+    let currentRotX = 0, currentRotY = 0;
+    let parallaxEnabled = false;
+
+    // The entrance animation (fill-mode: forwards) would override our inline
+    // transform forever — release it once it finishes so tilt can take over.
+    heroContent.addEventListener('animationend', (e) => {
+        if (e.animationName === 'hero-entrance') {
+            heroContent.style.animation = 'none';
+            parallaxEnabled = true;
+        }
+    });
+
+    const isTouch = COARSE_POINTER;
+
+    if (isTouch) {
+        window.addEventListener('deviceorientation', (e) => {
+            if (e.beta === null || e.gamma === null) return;
+            // Map beta (pitch) and gamma (roll)
+            targetRotX = Math.max(-5, Math.min(5, (e.beta - 45) * 0.2));
+            targetRotY = Math.max(-8, Math.min(8, e.gamma * 0.25));
+        });
+    } else {
+        document.addEventListener('mousemove', (e) => {
+            const normX = (e.clientX / window.innerWidth) - 0.5; // -0.5 to 0.5
+            const normY = (e.clientY / window.innerHeight) - 0.5; // -0.5 to 0.5
+
+            targetRotY = normX * 16; // ±8°
+            targetRotX = -normY * 10; // ±5°
         });
 
-        heroSection.addEventListener('mouseleave', () => {
-            heroLogo.style.transform = 'translate(0, 0)';
-            heroLogo.style.transition = 'transform 0.5s ease';
-            setTimeout(() => { heroLogo.style.transition = ''; }, 500);
+        document.addEventListener('mouseleave', () => {
+            targetRotX = 0;
+            targetRotY = 0;
         });
     }
+
+    function animate() {
+        currentRotX += (targetRotX - currentRotX) * 0.08;
+        currentRotY += (targetRotY - currentRotY) * 0.08;
+
+        if (parallaxEnabled) {
+            heroContent.style.transform = `perspective(1200px) rotateX(${currentRotX.toFixed(3)}deg) rotateY(${currentRotY.toFixed(3)}deg)`;
+        }
+
+        requestAnimationFrame(animate);
+    }
+    animate();
 })();
 
 
@@ -894,10 +1012,10 @@ function animateSpecs() {
 // ═══════════════════════════════════════════════════════════
 (function konamiEgg() {
     let progress = 0;
-    const code = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
+    const code = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
 
     document.addEventListener('keydown', (e) => {
-        if (e.keyCode === code[progress]) {
+        if (e.key.toLowerCase() === code[progress].toLowerCase()) {
             progress++;
             if (progress === code.length) {
                 progress = 0;
@@ -909,7 +1027,296 @@ function animateSpecs() {
                 }, 200);
             }
         } else {
-            progress = 0;
+            progress = (e.key.toLowerCase() === code[0].toLowerCase()) ? 1 : 0;
         }
     });
 })();
+
+
+// ═══════════════════════════════════════════════════════════
+// MODULE 15: SCROLL PROGRESS INDICATOR
+// ═══════════════════════════════════════════════════════════
+(function scrollProgressBar() {
+    const progressEl = document.getElementById('scroll-progress');
+    if (!progressEl) return;
+
+    function updateProgress() {
+        const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
+        const pct = totalHeight > 0 ? (window.scrollY / totalHeight) : 0;
+        progressEl.style.width = (pct * 100) + '%';
+    }
+
+    window.addEventListener('scroll', updateProgress, { passive: true });
+    updateProgress();
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+// MODULE 16: SECTION REVEALS & STAGGERED CHILDREN
+// ═══════════════════════════════════════════════════════════
+(function sectionRevealSystem() {
+    // Setup stagger transition delays for direct children of [data-stagger]
+    document.querySelectorAll('[data-stagger]').forEach(parent => {
+        Array.from(parent.children).forEach((child, i) => {
+            child.style.transitionDelay = `${i * 0.08}s`;
+        });
+    });
+
+    const revealObserver = new IntersectionObserver((entries) => {
+        entries.forEach(e => {
+            if (e.isIntersecting) {
+                e.target.classList.add('revealed');
+                if (e.target.classList.contains('specs-grid')) animateSpecs();
+                revealObserver.unobserve(e.target);
+            }
+        });
+    }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
+
+    document.querySelectorAll('[data-reveal]').forEach(el => revealObserver.observe(el));
+
+    // Ensure hero section and its contents reveal on load
+    const hero = document.getElementById('hero');
+    if (hero) {
+        hero.classList.add('revealed');
+        hero.querySelectorAll('[data-reveal]').forEach(el => el.classList.add('revealed'));
+    }
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+// MODULE 17: SECTION NAV ACTIVE STATE
+// ═══════════════════════════════════════════════════════════
+(function sectionNavActive() {
+    const sections = document.querySelectorAll('section[id]');
+    const navLinks = document.querySelectorAll('.nav-link');
+    if (!sections.length || !navLinks.length) return;
+
+    const navObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const id = entry.target.getAttribute('id');
+                navLinks.forEach(link => {
+                    const href = link.getAttribute('href');
+                    if (href === `#${id}`) {
+                        link.classList.add('active');
+                    } else if (href && href.startsWith('#')) {
+                        link.classList.remove('active');
+                    }
+                });
+            }
+        });
+    }, { threshold: 0.25, rootMargin: '-10% 0px -40% 0px' });
+
+    sections.forEach(sec => navObserver.observe(sec));
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+// MODULE 18: HERO LIVE SYSTEM STATUS
+// ═══════════════════════════════════════════════════════════
+(function heroLiveStatus() {
+    const statusContainer = document.getElementById('hero-live-status');
+    const cpuEl = document.getElementById('hero-cpu-status');
+    const uptimeEl = document.getElementById('hero-uptime-status');
+    const modelEl = document.getElementById('hero-model-status');
+
+    if (!statusContainer || !cpuEl) return;
+
+    let failures = 0;
+    const MAX_FAILURES = 3; // static hosting / backend down → stop hammering, stop scaring visitors
+
+    async function updateTelemetry() {
+        try {
+            const res = await fetch('/api/telemetry', { cache: 'no-store' });
+            if (!res.ok) throw new Error('API unreachable');
+            const data = await res.json();
+            failures = 0;
+
+            statusContainer.classList.remove('offline');
+            cpuEl.textContent = `CPU ${data.cpu !== undefined ? data.cpu : 0}%`;
+
+            if (data.uptime) {
+                uptimeEl.textContent = `UPTIME ${data.uptime}`;
+            } else {
+                const s = Math.floor((Date.now() - startTime) / 1000);
+                const h = Math.floor(s / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                uptimeEl.textContent = `UPTIME ${h}h ${m}m`;
+            }
+
+            if (data.ai && data.ai.model) {
+                modelEl.textContent = `${data.ai.model.toUpperCase()} ONLINE`;
+            } else {
+                modelEl.textContent = 'GEMMA 4 ONLINE';
+            }
+        } catch (e) {
+            failures++;
+            if (failures >= MAX_FAILURES) {
+                // No backend reachable (e.g. page served statically) — hide the live pill quietly
+                statusContainer.style.display = 'none';
+                return;
+            }
+        }
+        setTimeout(updateTelemetry, 5000);
+    }
+
+    // Delay 1s after load, then poll every 5s
+    setTimeout(updateTelemetry, 1000);
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+// MODULE 19: ORBIT PARTICLE TRAILS (Three.js)
+// ═══════════════════════════════════════════════════════════
+(function orbitParticleTrails() {
+    const canvas = document.getElementById('hero-orbit-canvas');
+    if (!canvas || !window.THREE) return;
+    if (REDUCED_MOTION || COARSE_POINTER) return;
+
+    const width = 320;
+    const height = 320;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-width / 2, width / 2, height / 2, -height / 2, 0.1, 1000);
+    camera.position.z = 10;
+
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    const particleCount = 200;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+
+    // Orbit radii corresponding to CSS: orbit-1 (90px), orbit-2 (110px), orbit-3 (130px)
+    const orbitDefs = [
+        { radius: 90, speed: (Math.PI * 2) / 20 },      // 20s forward
+        { radius: 110, speed: -(Math.PI * 2) / 30 },    // 30s reverse
+        { radius: 130, speed: (Math.PI * 2) / 40 }      // 40s forward
+    ];
+
+    const particles = [];
+
+    for (let i = 0; i < particleCount; i++) {
+        const orbitIndex = i % 3;
+        const orbit = orbitDefs[orbitIndex];
+        const angle = Math.random() * Math.PI * 2;
+        const lifespan = 3.0;
+        const age = Math.random() * lifespan;
+
+        particles.push({
+            orbitIndex,
+            angle,
+            lifespan,
+            age,
+            baseRadius: orbit.radius,
+            radialOffset: (Math.random() - 0.5) * 4
+        });
+
+        const r = orbit.radius;
+        positions[i * 3] = Math.cos(angle) * r;
+        positions[i * 3 + 1] = Math.sin(angle) * r;
+        positions[i * 3 + 2] = 0;
+
+        // Base color: cyan (0x00, 0xf0, 0xff) / purple (0xa8, 0x55, 0xf7)
+        colors[i * 3] = orbitIndex === 1 ? 0.66 : 0.0;
+        colors[i * 3 + 1] = orbitIndex === 1 ? 0.33 : 0.94;
+        colors[i * 3 + 2] = 1.0;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    // Custom circle texture for soft glowing particles
+    const circleCanvas = document.createElement('canvas');
+    circleCanvas.width = 32;
+    circleCanvas.height = 32;
+    const ctx = circleCanvas.getContext('2d');
+    const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.3, 'rgba(0,240,255,0.9)');
+    grad.addColorStop(1, 'rgba(0,240,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 32, 32);
+
+    const texture = new THREE.CanvasTexture(circleCanvas);
+
+    const material = new THREE.PointsMaterial({
+        size: 5,
+        map: texture,
+        transparent: true,
+        vertexColors: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+
+    const pointCloud = new THREE.Points(geometry, material);
+    scene.add(pointCloud);
+
+    let lastTime = performance.now();
+
+    function render() {
+        const now = performance.now();
+        const delta = Math.min((now - lastTime) / 1000, 0.1);
+        lastTime = now;
+
+        const posAttr = geometry.attributes.position;
+        const colAttr = geometry.attributes.color;
+
+        for (let i = 0; i < particleCount; i++) {
+            const p = particles[i];
+            const orbit = orbitDefs[p.orbitIndex];
+
+            // Progress age and angle
+            p.age += delta;
+            if (p.age > p.lifespan) {
+                p.age = 0;
+                p.angle = Math.random() * Math.PI * 2;
+            }
+
+            p.angle += orbit.speed * delta;
+
+            const r = p.baseRadius + p.radialOffset;
+            posAttr.array[i * 3] = Math.cos(p.angle) * r;
+            posAttr.array[i * 3 + 1] = Math.sin(p.angle) * r;
+
+            // Fade alpha / brightness based on lifespan (fade from cyan/purple to transparent)
+            const alpha = Math.max(0, 1.0 - (p.age / p.lifespan));
+            const isPurple = p.orbitIndex === 1;
+            colAttr.array[i * 3] = (isPurple ? 0.66 : 0.0) * alpha;
+            colAttr.array[i * 3 + 1] = (isPurple ? 0.33 : 0.94) * alpha;
+            colAttr.array[i * 3 + 2] = 1.0 * alpha;
+        }
+
+        posAttr.needsUpdate = true;
+        colAttr.needsUpdate = true;
+
+        renderer.render(scene, camera);
+    }
+    visibleLoop(canvas, render);
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+// MODULE 20: CTA BUTTON RIPPLE EFFECT
+// ═══════════════════════════════════════════════════════════
+(function ctaRipple() {
+    const ctaBtn = document.getElementById('cta-init');
+    if (!ctaBtn) return;
+
+    ctaBtn.addEventListener('click', function(e) {
+        const rect = this.getBoundingClientRect();
+        const ripple = document.createElement('span');
+        ripple.className = 'ripple';
+        ripple.style.left = `${e.clientX - rect.left}px`;
+        ripple.style.top = `${e.clientY - rect.top}px`;
+        this.appendChild(ripple);
+
+        setTimeout(() => {
+            ripple.remove();
+        }, 600);
+    });
+})();
+
+

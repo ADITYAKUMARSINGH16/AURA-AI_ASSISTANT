@@ -5,13 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AURA // Autonomous Utility & Response Agent</title>
     <meta name="description" content="AURA is a locally-hosted, voice-enabled AI assistant with a Tactical HUD interface. Voice command, live telemetry, smart home control, and autonomous routines — all on one console.">
-    <link rel="icon" type="image/jpeg" href="logo.jpg">
-    <link rel="stylesheet" href="landing.css?v=2">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta name="theme-color" content="#020810">
+    <meta property="og:title" content="AURA // Autonomous Utility & Response Agent">
+    <meta property="og:description" content="Locally-hosted, voice-enabled AI assistant with a Tactical HUD. 100% local inference, zero cloud dependency.">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="hud_screenshot_new.webp">
+    <link rel="icon" type="image/webp" href="logo_small.webp">
+    <link rel="stylesheet" href="tokens.css">
+    <link rel="stylesheet" href="landing.css?v=3">
 </head>
 <body>
+
+    <noscript>
+        <style>
+            #boot-overlay, .cursor-dot, .cursor-ring, .cursor-trail-canvas { display: none !important; }
+            [data-reveal], [data-stagger] > * { opacity: 1 !important; transform: none !important; }
+        </style>
+    </noscript>
 
     <!-- ═══════════════════════════════════════════ -->
     <!-- CINEMATIC BOOT OVERLAY -->
@@ -20,7 +30,7 @@
         <div class="boot-scanline"></div>
         <div class="boot-content">
             <div class="boot-logo-small">
-                <img src="logo.jpg" alt="AURA" class="boot-logo-img">
+                <img src="logo_small.webp" alt="AURA" class="boot-logo-img">
             </div>
             <div id="boot-lines" class="boot-lines"></div>
             <div class="boot-prompt" id="boot-prompt">
@@ -50,8 +60,8 @@
     <!-- ═══════════════════════════════════════════ -->
     <div class="hud-overlay hud-tl" id="hud-coords">
         <div class="hud-ov-label">COORDINATES</div>
-        <div class="hud-ov-value" id="hud-lat">28.6139° N</div>
-        <div class="hud-ov-value" id="hud-lng">77.2090° E</div>
+        <div class="hud-ov-value" id="hud-lat">LOCATING...</div>
+        <div class="hud-ov-value" id="hud-lng">LOCATING...</div>
     </div>
     <div class="hud-overlay hud-tr" id="hud-signal">
         <div class="hud-ov-label">SIGNAL</div>
@@ -80,7 +90,7 @@
     <!-- ═══════════════════════════════════════════ -->
     <nav class="nav-bar" id="navbar">
         <div class="nav-left">
-            <img src="logo.jpg" alt="AURA" class="nav-logo">
+            <img src="logo_small.webp" alt="AURA" class="nav-logo">
             <span class="nav-brand">AURA</span>
         </div>
         <div class="nav-links">
@@ -92,7 +102,7 @@
             <a href="#capabilities" class="nav-link">SPECS</a>
         </div>
         <div class="nav-right">
-            <button class="sound-toggle" id="sound-toggle" title="Toggle Sound">
+            <button class="sound-toggle" id="sound-toggle" title="Toggle ambient sound" aria-label="Toggle ambient sound" aria-pressed="false">
                 <svg class="sound-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18">
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
@@ -111,18 +121,21 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 1: HERO -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <section class="hero" id="hero">
-        <div class="ambient-orb orb-1"></div>
-        <div class="ambient-orb orb-2"></div>
-        <div class="ambient-orb orb-3"></div>
+    <section class="hero" id="hero" data-reveal>
+        <div class="ambient-orb orb-1" data-depth="0.2"></div>
+        <div class="ambient-orb orb-2" data-depth="0.5"></div>
+        <div class="ambient-orb orb-3" data-depth="0.8"></div>
+        <div class="ambient-orb orb-4" data-depth="0.3"></div>
+        <div class="ambient-orb orb-5" data-depth="0.6"></div>
 
-        <div class="hero-content">
+        <div class="hero-content" data-reveal>
             <div class="logo-system">
+                <canvas id="hero-orbit-canvas" class="hero-orbit-canvas"></canvas>
                 <div class="orbit orbit-1"><div class="orbit-dot"></div></div>
                 <div class="orbit orbit-2"><div class="orbit-dot"></div></div>
                 <div class="orbit orbit-3"><div class="orbit-dot"></div></div>
                 <div class="logo-core">
-                    <img src="logo.jpg" alt="AURA Logo" class="hero-logo" id="hero-logo">
+                    <img src="logo_small.webp" alt="AURA Logo" class="hero-logo" id="hero-logo">
                     <div class="logo-pulse"></div>
                     <div class="logo-pulse delay-1"></div>
                     <div class="logo-pulse delay-2"></div>
@@ -145,6 +158,14 @@
                     <span class="meta-tag">FULLY OFFLINE</span>
                     <span class="meta-sep">|</span>
                     <span class="meta-tag">OPEN SOURCE</span>
+                </div>
+                <div class="hero-live-status" id="hero-live-status">
+                    <span class="status-dot pulse"></span>
+                    <span id="hero-cpu-status">CPU —</span>
+                    <span class="status-sep">·</span>
+                    <span id="hero-uptime-status">UPTIME —</span>
+                    <span class="status-sep">·</span>
+                    <span id="hero-model-status">GEMMA 4 ONLINE</span>
                 </div>
             </div>
 
@@ -169,15 +190,15 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 2: FEATURES -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <section class="features" id="features">
-        <div class="section-header reveal">
+    <section class="features" id="features" data-reveal>
+        <div class="section-header" data-reveal>
             <div class="section-tag">// SYSTEM MODULES</div>
             <h2 class="section-title">CORE <span class="accent">CAPABILITIES</span></h2>
             <p class="section-desc">Six integrated subsystems working in concert. Each module operates independently but communicates through AURA's neural mesh.</p>
         </div>
 
-        <div class="features-grid">
-            <div class="feature-card reveal" id="feat-voice">
+        <div class="features-grid" data-reveal data-stagger>
+            <div class="feature-card" id="feat-voice">
                 <div class="card-glow"></div>
                 <div class="card-number">01</div>
                 <div class="card-icon">
@@ -186,8 +207,20 @@
                 <h3 class="card-title">VOICE CORE</h3>
                 <p class="card-desc">Neural TTS with Edge voices. Wake-word activation — say "Hey Aura" and she's listening. Real-time speech-to-text transcription.</p>
                 <div class="card-status"><span class="status-dot active"></span>ACTIVE</div>
+                <!-- Mini Demo 1: Voice Waveform -->
+                <div class="card-demo demo-voice">
+                    <div class="card-demo-header">VOICE SPECTROGRAM</div>
+                    <div class="waveform-container">
+                        <span class="wave-bar wb-1"></span>
+                        <span class="wave-bar wb-2"></span>
+                        <span class="wave-bar wb-3"></span>
+                        <span class="wave-bar wb-4"></span>
+                        <span class="wave-bar wb-5"></span>
+                    </div>
+                    <div class="demo-caption">EDGE TTS // 48kHz HIFI</div>
+                </div>
             </div>
-            <div class="feature-card reveal" id="feat-vision">
+            <div class="feature-card" id="feat-vision">
                 <div class="card-glow"></div>
                 <div class="card-number">02</div>
                 <div class="card-icon">
@@ -196,8 +229,24 @@
                 <h3 class="card-title">SCREEN VISION</h3>
                 <p class="card-desc">Captures and reads text from your screen using Tesseract OCR. Full screenshot analysis on demand.</p>
                 <div class="card-status"><span class="status-dot active"></span>ACTIVE</div>
+                <!-- Mini Demo 2: OCR Bounding Boxes -->
+                <div class="card-demo demo-vision">
+                    <div class="card-demo-header">OCR BOUNDING BOXES</div>
+                    <div class="ocr-mockup">
+                        <div class="ocr-shape s1"></div>
+                        <div class="ocr-shape s2"></div>
+                        <div class="ocr-shape s3"></div>
+                        <div class="ocr-box box-1">
+                            <span class="ocr-label">TEXT DETECTED</span>
+                        </div>
+                        <div class="ocr-box box-2">
+                            <span class="ocr-label">TEXT DETECTED</span>
+                        </div>
+                    </div>
+                    <div class="demo-caption">TESSERACT // LIVE SCAN</div>
+                </div>
             </div>
-            <div class="feature-card reveal" id="feat-home">
+            <div class="feature-card" id="feat-home">
                 <div class="card-glow"></div>
                 <div class="card-number">03</div>
                 <div class="card-icon">
@@ -206,8 +255,25 @@
                 <h3 class="card-title">HOME GRID</h3>
                 <p class="card-desc">Local network scanning and smart home device control. Monitor, manage, and automate your connected infrastructure.</p>
                 <div class="card-status"><span class="status-dot syncing"></span>SYNCING</div>
+                <!-- Mini Demo 3: Smart Home Mesh -->
+                <div class="card-demo demo-home">
+                    <div class="card-demo-header">DEVICE MESH DISCOVERY</div>
+                    <div class="mesh-discovery">
+                        <div class="mesh-ripple"></div>
+                        <div class="dev-node d-hub"><span class="dev-tag">AURA</span></div>
+                        <div class="dev-node d-light"><span class="dev-tag">LIGHT</span></div>
+                        <div class="dev-node d-cam"><span class="dev-tag">CAM</span></div>
+                        <div class="dev-node d-tv"><span class="dev-tag">TV</span></div>
+                        <svg class="mesh-lines" viewBox="0 0 170 75">
+                            <line x1="85" y1="37" x2="24" y2="18" stroke="var(--cyan)" stroke-width="1.5" stroke-dasharray="3 3"/>
+                            <line x1="85" y1="37" x2="146" y2="18" stroke="var(--cyan)" stroke-width="1.5" stroke-dasharray="3 3"/>
+                            <line x1="85" y1="37" x2="85" y2="58" stroke="var(--cyan)" stroke-width="1.5" stroke-dasharray="3 3"/>
+                        </svg>
+                    </div>
+                    <div class="demo-caption">4 NODES // AUTO-DISCOVERED</div>
+                </div>
             </div>
-            <div class="feature-card reveal" id="feat-system">
+            <div class="feature-card" id="feat-system">
                 <div class="card-glow"></div>
                 <div class="card-number">04</div>
                 <div class="card-icon">
@@ -216,26 +282,92 @@
                 <h3 class="card-title">SYS CONTROL</h3>
                 <p class="card-desc">Lock, sleep, shutdown. Volume, media playback. Launch and kill applications. Full OS-level command authority.</p>
                 <div class="card-status"><span class="status-dot active"></span>ACTIVE</div>
+                <!-- Mini Demo 4: System Telemetry Gauges -->
+                <div class="card-demo demo-system">
+                    <div class="card-demo-header">TELEMETRY GAUGES</div>
+                    <div class="sys-gauges">
+                        <div class="gauge-col">
+                            <svg viewBox="0 0 36 36" class="gauge-circle">
+                                <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                <path class="gauge-fill cpu-fill" stroke-dasharray="88, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            </svg>
+                            <span class="gauge-val cpu-counter">88%</span>
+                            <span class="gauge-lbl">CPU</span>
+                        </div>
+                        <div class="gauge-col">
+                            <svg viewBox="0 0 36 36" class="gauge-circle">
+                                <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                <path class="gauge-fill ram-fill" stroke-dasharray="72, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            </svg>
+                            <span class="gauge-val ram-counter">72%</span>
+                            <span class="gauge-lbl">RAM</span>
+                        </div>
+                        <div class="gauge-col">
+                            <svg viewBox="0 0 36 36" class="gauge-circle">
+                                <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                <path class="gauge-fill gpu-fill" stroke-dasharray="94, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            </svg>
+                            <span class="gauge-val gpu-counter">94%</span>
+                            <span class="gauge-lbl">GPU</span>
+                        </div>
+                    </div>
+                    <div class="demo-caption">OS KERNEL // FULL CONTROL</div>
+                </div>
             </div>
-            <div class="feature-card reveal" id="feat-web">
+            <div class="feature-card" id="feat-web">
                 <div class="card-glow"></div>
                 <div class="card-number">05</div>
                 <div class="card-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                 </div>
-                <h3 class="card-title">WEB INTEL</h3>
-                <p class="card-desc">Real-time internet search via DuckDuckGo. Clipboard integration. Instant knowledge retrieval without leaving the console.</p>
+                <h3 class="card-title">WEB & SECURITY</h3>
+                <p class="card-desc">Real-time web intelligence and firewall surveillance. Sentinel port scanning and threat isolation.</p>
                 <div class="card-status"><span class="status-dot active"></span>ONLINE</div>
+                <!-- Mini Demo 5: Security Sentinel Port List -->
+                <div class="card-demo demo-security">
+                    <div class="card-demo-header">SENTINEL PORT AUDIT</div>
+                    <div class="port-list">
+                        <div class="port-row pr-1">
+                            <span>PORT 443 (HTTPS)</span><span class="safe">SAFE ✓</span>
+                        </div>
+                        <div class="port-row pr-2">
+                            <span>PORT 22 (SSH)</span><span class="safe">SAFE ✓</span>
+                        </div>
+                        <div class="port-row pr-3">
+                            <span>PORT 4444 (METASPL)</span><span class="alert blink">ALERT ⚠</span>
+                        </div>
+                    </div>
+                    <div class="demo-caption">FIREWALL // REALTIME SHIELD</div>
+                </div>
             </div>
-            <div class="feature-card reveal" id="feat-memory">
+            <div class="feature-card" id="feat-memory">
                 <div class="card-glow"></div>
                 <div class="card-number">06</div>
                 <div class="card-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                 </div>
-                <h3 class="card-title">NEURAL ARCHIVE</h3>
-                <p class="card-desc">Persistent memory across sessions. AURA remembers context, preferences, and history. Long-term knowledge that evolves.</p>
+                <h3 class="card-title">PLANNER & ARCHIVE</h3>
+                <p class="card-desc">Multi-step agentic execution engine with persistent neural memory. Autonomous task breakdown and tool chaining.</p>
                 <div class="card-status"><span class="status-dot syncing"></span>SYNCING</div>
+                <!-- Mini Demo 6: Agentic Planner Checklist -->
+                <div class="card-demo demo-planner">
+                    <div class="card-demo-header">AGENTIC EXECUTION PLAN</div>
+                    <div class="checklist">
+                        <div class="check-item ci-1">
+                            <span class="check-box">✓</span>
+                            <span class="check-text">STEP 1: INGEST INTENT</span>
+                        </div>
+                        <div class="check-item ci-2">
+                            <span class="check-box">✓</span>
+                            <span class="check-text">STEP 2: SYNTHESIZE PLAN</span>
+                        </div>
+                        <div class="check-item ci-3">
+                            <span class="check-box">✓</span>
+                            <span class="check-text">STEP 3: EXECUTE TOOLS</span>
+                        </div>
+                    </div>
+                    <div class="demo-caption">GEMMA 4 // MULTI-STEP REASONING</div>
+                </div>
             </div>
         </div>
     </section>
@@ -243,13 +375,13 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 3: 3D GLOBE -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <section class="globe-section" id="globe">
-        <div class="section-header reveal">
+    <section class="globe-section" id="globe" data-reveal>
+        <div class="section-header" data-reveal>
             <div class="section-tag">// NETWORK TOPOLOGY</div>
             <h2 class="section-title">GLOBAL <span class="accent">NETWORK</span></h2>
             <p class="section-desc">AURA's neural mesh spans your local infrastructure. Every node, every connection — mapped and monitored in real-time.</p>
         </div>
-        <div class="globe-container reveal">
+        <div class="globe-container" data-reveal>
             <canvas id="globe-canvas"></canvas>
             <div class="globe-stats">
                 <div class="globe-stat">
@@ -275,14 +407,14 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 4: INTERACTIVE TERMINAL -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <section class="terminal-section" id="terminal">
-        <div class="section-header reveal">
+    <section class="terminal-section" id="terminal" data-reveal>
+        <div class="section-header" data-reveal>
             <div class="section-tag">// LIVE INTERFACE</div>
             <h2 class="section-title">COMMAND <span class="accent">TERMINAL</span></h2>
-            <p class="section-desc">Try it yourself. Type a command below — AURA responds in real-time.</p>
+            <p class="section-desc">Try it yourself. Type a command below — AURA responds in real-time. <em>(Simulated demo — launch the HUD for the real agent.)</em></p>
         </div>
 
-        <div class="terminal-showcase reveal">
+        <div class="terminal-showcase" data-reveal>
             <div class="terminal-window">
                 <div class="terminal-toolbar">
                     <div class="terminal-dots">
@@ -291,7 +423,7 @@
                         <span class="dot dot-green"></span>
                     </div>
                     <div class="terminal-title">AURA :: INTERACTIVE CONSOLE</div>
-                    <div class="terminal-controls">
+                    <div class="terminal-controls" aria-hidden="true">
                         <span class="ctrl-btn">—</span>
                         <span class="ctrl-btn">□</span>
                         <span class="ctrl-btn">✕</span>
@@ -301,8 +433,8 @@
                     <div class="terminal-line boot-line">> AURA CORE v2.0 — Boot Sequence Initiated</div>
                 </div>
                 <div class="terminal-input-area">
-                    <span class="prompt-char">></span>
-                    <input type="text" id="terminal-input" class="terminal-input" placeholder="Type 'help' for commands..." autocomplete="off" spellcheck="false">
+                    <span class="prompt-char" aria-hidden="true">></span>
+                    <input type="text" id="terminal-input" class="terminal-input" placeholder="Type 'help' for commands..." autocomplete="off" spellcheck="false" aria-label="Terminal command input">
                 </div>
             </div>
         </div>
@@ -311,25 +443,25 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 5: COMPARISON TABLE -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <section class="compare-section" id="compare">
-        <div class="section-header reveal">
+    <section class="compare-section" id="compare" data-reveal>
+        <div class="section-header" data-reveal>
             <div class="section-tag">// TACTICAL ADVANTAGE</div>
             <h2 class="section-title">AURA <span class="accent">vs CLOUD</span></h2>
             <p class="section-desc">See why running your AI locally changes everything.</p>
         </div>
 
-        <div class="compare-table-wrap reveal">
+        <div class="compare-table-wrap" data-reveal>
             <table class="compare-table">
                 <thead>
                     <tr>
                         <th class="compare-feature-col">FEATURE</th>
-                        <th class="compare-aura-col"><img src="logo.jpg" alt="" class="compare-logo"> AURA</th>
+                        <th class="compare-aura-col"><img src="logo_small.webp" alt="" class="compare-logo"> AURA</th>
                         <th>ALEXA</th>
                         <th>SIRI</th>
                         <th>CHATGPT</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody data-stagger>
                     <tr>
                         <td class="compare-feature">DATA PRIVACY</td>
                         <td class="compare-aura"><span class="check-yes">✦ 100% LOCAL</span></td>
@@ -387,13 +519,13 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 6: SPECS -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <section class="capabilities" id="capabilities">
-        <div class="section-header reveal">
+    <section class="capabilities" id="capabilities" data-reveal>
+        <div class="section-header" data-reveal>
             <div class="section-tag">// TECHNICAL SPECIFICATIONS</div>
             <h2 class="section-title">SYSTEM <span class="accent">SPECS</span></h2>
         </div>
 
-        <div class="specs-grid reveal">
+        <div class="specs-grid" data-reveal data-stagger>
             <div class="spec-card">
                 <div class="spec-value" data-target="100">0</div>
                 <div class="spec-unit">%</div>
@@ -420,7 +552,7 @@
             </div>
         </div>
 
-        <div class="tech-stack reveal">
+        <div class="tech-stack" data-reveal data-stagger>
             <div class="tech-item"><span class="tech-label">ENGINE</span><span class="tech-value">Ollama + Gemma 4</span></div>
             <div class="tech-item"><span class="tech-label">VOICE</span><span class="tech-value">Edge TTS + Google STT</span></div>
             <div class="tech-item"><span class="tech-label">VISION</span><span class="tech-value">Tesseract OCR</span></div>
@@ -432,17 +564,17 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 7: HUD CAROUSEL -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <section class="carousel-section" id="carousel">
-        <div class="section-header reveal">
+    <section class="carousel-section" id="carousel" data-reveal>
+        <div class="section-header" data-reveal>
             <div class="section-tag">// INTERFACE GALLERY</div>
             <h2 class="section-title">HUD <span class="accent">PREVIEW</span></h2>
             <p class="section-desc">The tactical heads-up display — your command center rendered in the browser.</p>
         </div>
 
-        <div class="carousel-wrap reveal">
+        <div class="carousel-wrap" data-reveal>
             <div class="carousel-track" id="carousel-track">
                 <div class="carousel-slide">
-                    <img src="hud_screenshot.png" alt="AURA HUD - Full Dashboard" class="carousel-img">
+                    <img src="hud_screenshot_new.webp" alt="AURA HUD - Full Dashboard" class="carousel-img" loading="lazy" decoding="async">
                     <div class="carousel-caption">FULL TACTICAL DASHBOARD</div>
                 </div>
                 <div class="carousel-slide">
@@ -478,14 +610,14 @@
                 </div>
             </div>
             <div class="carousel-nav">
-                <button class="carousel-btn" id="carousel-prev">◂</button>
-                <div class="carousel-dots" id="carousel-dots">
-                    <span class="c-dot active"></span>
-                    <span class="c-dot"></span>
-                    <span class="c-dot"></span>
-                    <span class="c-dot"></span>
+                <button class="carousel-btn" id="carousel-prev" aria-label="Previous slide">◂</button>
+                <div class="carousel-dots" id="carousel-dots" role="group" aria-label="Slide selector">
+                    <button type="button" class="c-dot active" aria-label="Go to slide 1"></button>
+                    <button type="button" class="c-dot" aria-label="Go to slide 2"></button>
+                    <button type="button" class="c-dot" aria-label="Go to slide 3"></button>
+                    <button type="button" class="c-dot" aria-label="Go to slide 4"></button>
                 </div>
-                <button class="carousel-btn" id="carousel-next">▸</button>
+                <button class="carousel-btn" id="carousel-next" aria-label="Next slide">▸</button>
             </div>
         </div>
     </section>
@@ -493,10 +625,10 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- FOOTER -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <footer class="footer">
+    <footer class="footer" data-reveal>
         <div class="footer-content">
             <div class="footer-brand">
-                <img src="logo.jpg" alt="AURA" class="footer-logo">
+                <img src="logo_small.webp" alt="AURA" class="footer-logo">
                 <span class="footer-name">AURA</span>
             </div>
             <div class="footer-tagline">AUTONOMOUS UTILITY & RESPONSE AGENT</div>
@@ -505,8 +637,11 @@
         <div class="footer-grid-fade"></div>
     </footer>
 
+    <!-- Scroll Progress Indicator -->
+    <div id="scroll-progress" class="scroll-progress"></div>
+
     <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="landing.js?v=2"></script>
+    <script src="vendor/three.min.js"></script>
+    <script src="landing.js?v=3"></script>
 </body>
 </html>

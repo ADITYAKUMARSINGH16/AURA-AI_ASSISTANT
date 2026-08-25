@@ -3,23 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AURA // Tactical AI Assistant</title>
-    <link rel="icon" type="image/jpeg" href="logo.jpg">
+    <title>AURA // AI Assistant</title>
+    <link rel="icon" type="image/webp" href="logo_small.webp">
+    <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- ═══════════════════════════════════════════ -->
-
-
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- SHORT BOOT OVERLAY -->
-    <!-- ═══════════════════════════════════════════ -->
+    <!-- ═══════════════ BOOT OVERLAY (signature moment) ═══════════════ -->
     <div id="boot-overlay">
-        <div class="boot-scanline"></div>
         <div class="boot-content">
-            <div class="boot-logo-small">
-                <img src="logo.jpg" alt="AURA" class="boot-logo-img">
-            </div>
+            <img src="logo_small.webp" alt="AURA" class="boot-logo-img">
             <div id="boot-lines" class="boot-lines"></div>
         </div>
         <div class="boot-progress">
@@ -27,469 +20,489 @@
         </div>
     </div>
 
-    <!-- Background Elements -->
-    <canvas id="particle-bg"></canvas>
-    <div class="ambient-orb orb-1"></div>
-    <div class="ambient-orb orb-2"></div>
+    <!-- ═══════════════ APP SHELL ═══════════════ -->
+    <div class="app-shell">
 
-    <!-- Scan line overlay -->
-    <div class="scanlines"></div>
-
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- FLOATING HUD OVERLAYS -->
-    <!-- ═══════════════════════════════════════════ -->
-    <div class="hud-overlay hud-tl">
-        <div style="display: flex; gap: 20px; align-items: flex-start;">
-            <div>
-                <div class="hud-ov-label">COORDINATES</div>
-                <div class="hud-ov-value" id="hud-lat">28.6139° N</div>
-                <div class="hud-ov-value" id="hud-lng">77.2090° E</div>
-            </div>
-            <div id="notif-bell" style="position: relative; cursor: pointer; padding: 5px; pointer-events: auto;">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-                </svg>
-                <div id="notif-badge" style="display:none; position:absolute; top:0; right:0; background:var(--error); color:#fff; font-size:10px; border-radius:50%; width:16px; height:16px; text-align:center; line-height:16px;">0</div>
-            </div>
-        </div>
-    </div>
-    <div class="hud-overlay hud-tr">
-        <div class="hud-ov-label">SIGNAL / UPLINK</div>
-        <div class="hud-ov-value" id="hud-signal">██████░░</div>
-        <div class="theme-selector" style="margin-top:10px; display:flex; gap:5px; justify-content:flex-end; pointer-events: auto;">
-            <div class="theme-dot" data-theme="" style="width:12px;height:12px;background:#00f0ff;border-radius:50%;cursor:pointer;border:1px solid #00f0ff;"></div>
-            <div class="theme-dot" data-theme="theme-crimson" style="width:12px;height:12px;background:#ff2a2a;border-radius:50%;cursor:pointer;border:1px solid transparent;"></div>
-            <div class="theme-dot" data-theme="theme-emerald" style="width:12px;height:12px;background:#00ff66;border-radius:50%;cursor:pointer;border:1px solid transparent;"></div>
-            <div class="theme-dot" data-theme="theme-violet" style="width:12px;height:12px;background:#d946ef;border-radius:50%;cursor:pointer;border:1px solid transparent;"></div>
-        </div>
-    </div>
-    <div class="hud-overlay hud-bl" id="threat-box">
-        <div class="hud-ov-label">THREAT LEVEL</div>
-        <div class="hud-ov-val" id="threat-val" style="color: var(--cyan);">CLEAR</div>
-        <div id="threat-msg" style="font-size: 10px; color: var(--text-dim); margin-top: 5px;">0 anomalies detected</div>
-    </div>
-    <div class="hud-overlay hud-br" id="hud-clock-ov">
-        <div class="hud-ov-label">SYSTEM CLOCK</div>
-        <div class="hud-ov-value" id="hud-sys-clock">00:00:00</div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- TOAST NOTIFICATIONS -->
-    <!-- ═══════════════════════════════════════════ -->
-    <div class="toast-container" id="toast-container"></div>
-
-    <header class="hud-header">
-        <div class="header-left">
-            <a href="index.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit;">
-                <img src="logo.jpg" alt="AURA Logo" class="aura-logo">
-                <span class="glow-text">AURA</span>
+        <!-- ── Sidebar navigation ── -->
+        <aside class="sidebar">
+            <a class="brand" href="index.html" title="AURA home">
+                <img src="logo_small.webp" alt="AURA Logo" class="brand-logo">
+                <span class="brand-name">AURA</span>
             </a>
-        </div>
-        <div class="header-center">
-            <span id="nav-systems" class="nav-btn">SYSTEMS</span>
-            <span id="nav-modules" class="nav-btn">MODULES</span>
-            <span id="nav-command" class="nav-btn">COMMAND</span>
-        </div>
-        <div class="header-right">
-            <button id="btn-shortcuts" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-family:var(--font-mono); font-size:1rem; margin-right:15px;" title="Keyboard Shortcuts">?</button>
-            <span class="status-secure"><span style="display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;margin-right:5px;box-shadow:0 0 5px var(--green);"></span>SECURE LINK</span>
-        </div>
-    </header>
 
-    <main class="hud-grid">
-        <!-- LEFT COLUMN -->
-        <div class="hud-col left-col">
-            <!-- Schedule Panel -->
-            <div class="panel schedule-panel" draggable="true">
-                <div class="panel-header drag-handle">SCHEDULE & REMINDERS</div>
-                <div class="schedule-list" id="schedule-list">
-                    <!-- Events will be populated here -->
-                </div>
-                <div class="schedule-add">
-                    <input type="text" id="sched-time" placeholder="HH:MM" style="width: 30%;">
-                    <input type="text" id="sched-event" placeholder="Event Name" style="flex: 1;">
-                    <button class="qa-btn" id="btn-add-sched" style="padding: 5px; flex-grow: 0; min-height: 24px; font-size: 10px;">ADD</button>
-                </div>
-            </div>
-
-            <div class="panel diagnostics-panel" draggable="true">
-                <div class="panel-header drag-handle">SYSTEM DIAGNOSTICS</div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>NEURAL LOAD</span><span id="load-val">88%</span></div>
-                    <div class="diag-bar"><div class="diag-fill" style="width: 88%"></div></div>
-                </div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>MEMORY</span><span id="mem-val">72%</span></div>
-                    <div class="diag-bar"><div class="diag-fill" style="width: 72%"></div></div>
-                </div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>UPLINK</span><span id="uplink-val" class="warning-text">64%</span></div>
-                    <div class="diag-bar"><div class="diag-fill warning-fill" style="width: 64%"></div></div>
-                </div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>POWER CELL</span><span id="power-val">12%</span></div>
-                    <div class="diag-bar"><div class="diag-fill" style="width: 12%"></div></div>
-                </div>
-            </div>
-
-            <!-- AURA CORE PERFORMANCE -->
-            <div class="panel ai-core-panel" draggable="true" id="panel-ai-core">
-                <div class="panel-header drag-handle">AURA CORE</div>
-                <div class="diag-item" style="border:none; margin-bottom: 2px;">
-                    <div class="diag-label"><span>MODEL</span><span id="ai-model-val" style="color: var(--cyan);">---</span></div>
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom: 2px;">
-                    <div class="diag-label"><span>TOKENS</span><span id="ai-tokens-val" style="color: var(--cyan);">0.0/s</span></div>
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom: 2px;">
-                    <div class="diag-label"><span>VISION</span><span id="ai-vision-val" style="color: var(--cyan);">0.0s</span></div>
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom: 2px;">
-                    <div class="diag-label"><span>TOOLS</span><span id="ai-tools-val" style="color: var(--cyan);">0.0s</span></div>
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom: 2px;">
-                    <div class="diag-label"><span>VRAM</span><span id="ai-vram-val" style="color: var(--cyan);">0.0GB</span></div>
-                </div>
-            </div>
-
-            <div class="panel terminal-panel" draggable="true">
-                <div class="panel-header drag-handle" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>COMMUNICATION LINK</span>
-                </div>
-                
-                <div class="mode-toggle">
-                    <button class="mode-btn active" id="btn-mode-term">TERMINAL</button>
-                    <button class="mode-btn" id="btn-mode-chat">CHAT</button>
-                </div>
-
-                <div id="terminal-output" class="terminal-output">
-                    <div>> initializing aura core ........... ok</div>
-                    <div>> neural mesh handshake ........... ok</div>
-                    <div>> sensor array calibrated ......... ok</div>
-                    <div>> voice interface online .......... ok</div>
-                    <div>> awaiting operator command</div>
-                </div>
-
-                <div id="chat-output" class="chat-output">
-                    <!-- Chat bubbles injected here -->
-                </div>
-
-                <div id="attachment-preview" class="attachment-preview"></div>
-                <div class="terminal-input-row">
-                    <button id="btn-attach" class="btn-attach" title="Attach file or image">
-                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-                        </svg>
-                    </button>
-                    <input type="file" id="file-upload" accept="image/*,.txt,.md,.py,.json,.csv,.js,.css,.html" multiple style="display: none;">
-                    <span class="prompt">></span>
-                    <input type="text" id="command-input" placeholder="Enter command..." autocomplete="off">
-                </div>
-            </div>
-
-            <!-- Process Manager Panel -->
-            <div class="panel process-panel" draggable="true">
-                <div class="panel-header drag-handle">ACTIVE PROCESSES</div>
-                <div class="process-list" id="process-list">
-                    <!-- Processes populate here -->
-                </div>
-            </div>
-
-            <!-- WEBCAM FEED PANEL -->
-            <div class="panel webcam-panel" draggable="true">
-                <div class="panel-header drag-handle">OPTICAL SENSOR FEED</div>
-                <div class="webcam-container" style="position: relative; border: 1px solid var(--border); overflow: hidden; height: 150px; background: #000;">
-                    <video id="webcam-video" autoplay muted playsinline style="width: 100%; height: 100%; object-fit: cover; opacity: 0.8; filter: grayscale(100%) contrast(1.2) sepia(20%) hue-rotate(140deg);"></video>
-                    <canvas id="webcam-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;"></canvas>
-                    <div style="position: absolute; top: 5px; left: 5px; color: var(--cyan); font-size: 8px; z-index: 20; background: rgba(0,0,0,0.5); padding: 2px;">REC // SENSOR 01</div>
-                </div>
-            </div>
-
-            <!-- SECURITY CENTER -->
-            <div class="panel security-panel" draggable="true">
-                <div class="panel-header drag-handle" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>LOCAL SECURITY CENTER</span>
-                    <button class="qa-btn" id="btn-sec-refresh" style="padding: 2px 5px; min-height: 18px; font-size: 9px; width: auto;">REFRESH</button>
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom:5px;">
-                    <div class="diag-label"><span>RISK LEVEL</span><span id="sec-risk-val" style="color: var(--cyan);">LOW</span></div>
-                </div>
-                <div id="sec-alerts-container" style="margin-bottom: 8px;">
-                </div>
-                <div style="font-size: 10px; color: var(--text-dim); max-height: 100px; overflow-y: auto; font-family: var(--font-mono); white-space: pre-wrap;" id="sec-details-container">Initializing security sweep...</div>
-            </div>
-
-            <!-- PENDING CONFIRMATIONS -->
-            <div class="panel permissions-panel" draggable="true" id="panel-permissions">
-                <div class="panel-header drag-handle" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>SECURITY CLEARANCE</span>
-                    <label style="font-size:8px; display:flex; align-items:center; gap:3px; cursor:pointer;" title="Auto-approve MEDIUM risk tools">
-                        <input type="checkbox" id="trusted-mode-toggle" style="margin:0;"> TRUSTED MODE
-                    </label>
-                </div>
-                <div class="permissions-list" id="permissions-list" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
-                    <!-- Pending actions will appear here -->
-                    <div style="font-size: 10px; color: var(--text-dim); text-align: center; padding: 10px;">NO PENDING ACTIONS</div>
-                </div>
-            </div>
-
-            <!-- CYBER-DECK FILE EXPLORER -->
-            <div class="panel fs-panel" draggable="true" id="panel-fs">
-                <div class="panel-header drag-handle">CYBER-DECK FILE EXPLORER</div>
-                <div class="fs-controls" style="display: flex; gap: 10px; margin-bottom: 5px; align-items: center;">
-                    <button id="fs-up-btn" class="qa-btn" style="padding: 2px 6px; font-size: 10px; min-height: unset; width: auto; flex-shrink: 0;">UP</button>
-                    <div id="fs-path" style="font-size: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim);">ROOT</div>
-                </div>
-                <div class="fs-list" id="fs-list" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
-                    <!-- Files go here -->
-                </div>
-            </div>
-        </div>
-
-        <!-- CENTER COLUMN -->
-        <div class="hud-col center-col">
-            <div class="center-title">
-                <div class="subtitle">TACTICAL AI ASSISTANT</div>
-                <h1 class="main-title glow-text">AURA</h1>
-                <p class="description">Voice command, live telemetry, and autonomous routines — all rendered on one console.</p>
-            </div>
-            
-            <div class="reactor-container">
-                <!-- Energy Pulses -->
-                <div class="energy-pulse p1"></div>
-                <div class="energy-pulse p2"></div>
-                <div class="energy-pulse p3"></div>
-                
-                <!-- 3D Reactor -->
-                <div id="reactor-3d" style="position:absolute; width:100%; height:100%; top:0; left:0; pointer-events:none; z-index: 1;"></div>
-                
-                <!-- 5 Ring System -->
-                <div class="reactor-ring ring-5"><div class="orbital-dot"></div><div class="orbital-dot d2"></div><div class="orbital-dot d3" style="top: 50%; left: -2px; width:4px; height:4px; background:var(--cyan-dim);"></div><div class="orbital-dot d4" style="top: 50%; right: -2px; left: auto; width:4px; height:4px; background:var(--cyan-dim);"></div></div>
-                <div class="reactor-ring ring-4">
-                    <svg viewBox="0 0 100 100" class="ring-svg"><circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20 10 40 10 10 10"/></svg>
-                </div>
-                <div class="reactor-ring ring-3"><div class="orbital-dot"></div></div>
-                <div class="reactor-ring ring-2"></div>
-                <div class="reactor-ring ring-1"></div>
-                <div class="reactor-ring sound-wave"></div>
-                
-                <button id="voice-btn" class="reactor-core" style="z-index: 2; position:relative;">
-                    <div class="core-bg"></div>
-                    <div class="core-text">CORE</div>
-                    <div class="core-status">ONLINE</div>
+            <nav class="side-nav" aria-label="Main navigation">
+                <button class="nav-item active" data-view="chat" aria-pressed="true" title="Chat">
+                    <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span class="nav-label">Chat</span>
                 </button>
-            </div>
-
-            <div class="quick-actions">
-                <button class="qa-btn" id="qa-read-screen" title="Read Screen">
-                    <svg viewBox="0 0 24 24"><path d="M2 12h20M12 2v20M5 5l14 14M19 5L5 19"/></svg>
+                <button class="nav-item" data-view="system" aria-pressed="false" title="System">
+                    <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+                    <span class="nav-label">System</span>
                 </button>
-                <button class="qa-btn" id="qa-lock" title="Lock System">
-                    <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                </button>
-                <button class="qa-btn" id="qa-web" title="Web Search">
-                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-                </button>
-                <button class="qa-btn" id="qa-scan" title="Threat Scan">
+                <button class="nav-item" data-view="security" aria-pressed="false" title="Security">
                     <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <span class="nav-label">Security</span>
                 </button>
-            </div>
-        </div>
+                <button class="nav-item" data-view="files" aria-pressed="false" title="Files">
+                    <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span class="nav-label">Files</span>
+                </button>
+                <button class="nav-item" data-view="memory" aria-pressed="false" title="Memory">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                    <span class="nav-label">Memory</span>
+                </button>
+                <button class="nav-item" data-view="settings" aria-pressed="false" title="Settings">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span class="nav-label">Settings</span>
+                </button>
+            </nav>
 
-        <!-- RIGHT COLUMN -->
-        <div class="hud-col right-col">
-            <!-- Thermals Panel -->
-            <div class="panel thermals-panel" draggable="true">
-                <div class="panel-header drag-handle">HARDWARE THERMALS</div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>CPU TEMP</span><span id="cpu-temp-val">45°C</span></div>
-                    <div class="diag-bar"><div class="diag-fill" id="cpu-temp-fill" style="width: 45%; background: var(--cyan);"></div></div>
+            <div class="sidebar-footer">
+                <div class="conn-status online" id="conn-status" role="status">
+                    <span class="conn-dot"></span>
+                    <span class="conn-text nav-label">ONLINE</span>
                 </div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>CPU FAN</span><span id="cpu-fan-val">2000 RPM</span></div>
-                    <div class="diag-bar"><div class="diag-fill" id="cpu-fan-fill" style="width: 50%;"></div></div>
-                </div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>GPU TEMP</span><span id="gpu-temp-val">40°C</span></div>
-                    <div class="diag-bar"><div class="diag-fill" id="gpu-temp-fill" style="width: 40%; background: var(--cyan);"></div></div>
-                </div>
-                <div class="diag-item">
-                    <div class="diag-label"><span>GPU MEM</span><span id="gpu-mem-val">4096 / 8192 MB</span></div>
-                    <div class="diag-bar"><div class="diag-fill" id="gpu-mem-fill" style="width: 50%;"></div></div>
-                </div>
-                <div class="diag-item" style="border:none;">
-                    <div class="diag-label"><span>GPU FAN</span><span id="gpu-fan-val">AUTO</span></div>
-                </div>
+                <div class="side-clock nav-label" id="hud-sys-clock">00:00:00</div>
             </div>
+        </aside>
 
-            <!-- Memory Viewer Panel -->
-            <div class="panel memory-panel" draggable="true">
-                <div class="panel-header drag-handle">MEMORY ARCHIVE</div>
-                <input type="text" id="memory-search" placeholder="Search memories..." style="width: 100%; background: rgba(0,240,255,0.05); border: 1px solid var(--border); color: var(--cyan); font-family: var(--font-mono); font-size: 10px; padding: 4px; outline: none; margin-bottom: 8px;">
-                <div class="memory-list" id="memory-list">
-                    <!-- Memories populate here -->
-                </div>
-            </div>
+        <!-- ── Main column ── -->
+        <div class="hud-main">
 
-            <!-- System Logs Panel -->
-            <div class="panel log-panel" draggable="true" id="panel-logs">
-                <div class="panel-header drag-handle" style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>SYSTEM LOGS</span>
-                    <button class="qa-btn" id="btn-log-refresh" style="padding: 2px 5px; min-height: 18px; font-size: 9px; width: auto;">REFRESH</button>
+            <header class="topbar">
+                <h1 class="view-title" id="view-title">Chat</h1>
+                <div class="topbar-right">
+                    <span class="signal-pill mono" id="hud-signal" title="Wi-Fi uplink">--------</span>
+                    <button id="notif-bell" class="icon-btn" role="button" aria-label="Notifications" tabindex="0">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                        <span id="notif-badge" class="notif-badge">0</span>
+                    </button>
+                    <button id="btn-shortcuts" class="icon-btn" title="Keyboard shortcuts (?)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                    </button>
                 </div>
-                <div class="log-output" id="log-output">
-                    <!-- Logs populate here -->
-                </div>
-            </div>
+            </header>
 
-            <!-- Network Grid Panel -->
-            <div class="panel network-panel" draggable="true">
-                <div class="panel-header drag-handle" style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>NETWORK GRID</span>
-                    <button class="qa-btn" id="btn-net-scan" style="padding: 2px 5px; min-height: 18px; font-size: 9px; width: auto;">SCAN</button>
-                </div>
-                <div class="network-canvas-container" style="position: relative; height: 150px; border: 1px solid var(--border); background: rgba(0,0,0,0.3); overflow: hidden;">
-                    <canvas id="network-canvas"></canvas>
-                </div>
-            </div>
+            <main class="views">
 
-            <div class="panel modules-panel" draggable="true">
-                <div class="panel-header drag-handle">ACTIVE MODULES</div>
-                <div class="module-item mod-btn" id="wake-word-toggle">
-                    <span>WAKE WORD</span><span class="status-idle" id="wake-word-status">OFF</span>
-                </div>
-                <div class="module-item mod-btn" id="mod-voice"><span>VOICE CORE</span><span class="status-active">ACTIVE</span></div>
-                <div class="module-item mod-btn" id="mod-threat"><span>THREAT SCAN</span><span class="status-idle">IDLE</span></div>
-                <div class="module-item mod-btn" id="mod-schedule"><span>SCHEDULE AI</span><span class="status-active">ACTIVE</span></div>
-                <div class="module-item mod-btn" id="mod-home"><span>HOME GRID</span><span class="status-active">ACTIVE</span></div>
-                <div class="module-item mod-btn" id="mod-archive"><span>ARCHIVE</span><span class="status-sync">SYNCING</span></div>
-            </div>
+                <!-- ══════════ VIEW: CHAT (home) ══════════ -->
+                <section class="view active" id="view-chat" data-title="Chat">
+                    <div class="chat-layout">
 
-            <!-- PROACTIVE INTELLIGENCE PANEL -->
-            <div class="panel proactive-panel" draggable="true">
-                <div class="panel-header drag-handle">PROACTIVE INTELLIGENCE</div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <span style="font-size:10px; color:var(--cyan);">MONITORING ENGINE</span>
-                    <button id="toggle-proactive" class="qa-btn" style="padding: 2px 5px; min-height:18px; width:auto; font-size:9px;">ON</button>
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom:5px;">
-                    <div class="diag-label"><span>CPU LIMIT</span><span id="thresh-cpu-val">90%</span></div>
-                    <input type="range" id="thresh-cpu" min="50" max="100" value="90" style="width:100%;">
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom:5px;">
-                    <div class="diag-label"><span>GPU TEMP</span><span id="thresh-gpu-val">85°C</span></div>
-                    <input type="range" id="thresh-gpu" min="50" max="100" value="85" style="width:100%;">
-                </div>
-                <div class="diag-item" style="border:none; margin-bottom:5px;">
-                    <div class="diag-label"><span>BATT MIN</span><span id="thresh-batt-val">20%</span></div>
-                    <input type="range" id="thresh-batt" min="5" max="50" value="20" style="width:100%;">
-                </div>
-                <button id="btn-save-proactive" class="qa-btn" style="width:100%; margin-top:5px;">SAVE CONFIG</button>
-            </div>
+                        <div class="console-card card">
+                            <div class="mode-toggle" role="group" aria-label="Console mode">
+                                <button type="button" class="mode-btn active" id="btn-mode-term" aria-pressed="true">Terminal</button>
+                                <button type="button" class="mode-btn" id="btn-mode-chat" aria-pressed="false">Chat</button>
+                            </div>
 
-            <div class="panel quick-actions-panel" draggable="true">
-                <div class="panel-header drag-handle">QUICK ACTIONS</div>
-                <div class="qa-grid">
-                    <button class="qa-btn" id="qa-read-screen">READ SCREEN</button>
-                    <button class="qa-btn" id="qa-lock">LOCK SYSTEM</button>
-                    <button class="qa-btn" id="qa-web">WEB SEARCH</button>
-                    <button class="qa-btn" id="qa-scan">THREAT SCAN</button>
-                </div>
-                <!-- Screenshot preview -->
-                <div style="margin-top: 10px; border: 1px dashed var(--cyan-dim); height: 100px; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer;" id="screen-preview-container">
-                    <span style="font-size: 10px; color: var(--text-dim);">No recent captures</span>
-                    <img id="screen-preview-img" style="display: none; width: 100%; object-fit: cover;">
-                </div>
-            </div>
+                            <div id="terminal-output" role="log" aria-live="polite" class="console-output terminal-mode">
+                                <div>> initializing aura core ........... ok</div>
+                                <div>> neural mesh handshake ........... ok</div>
+                                <div>> sensor array calibrated ......... ok</div>
+                                <div>> voice interface online .......... ok</div>
+                                <div>> awaiting operator command</div>
+                            </div>
 
-            <div class="panel charts-panel" draggable="true">
-                <div class="panel-header drag-handle">LIVE TELEMETRY</div>
-                
-                <div class="chart-container">
-                    <span class="chart-label">CPU LOAD</span>
-                    <span class="chart-val" id="chart-cpu-val">0%</span>
-                    <canvas id="chart-cpu" class="system-chart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <span class="chart-label">MEMORY</span>
-                    <span class="chart-val" id="chart-mem-val">0%</span>
-                    <canvas id="chart-mem" class="system-chart"></canvas>
-                </div>
-                <div class="chart-container" style="margin-bottom:0;">
-                    <span class="chart-label">NETWORK</span>
-                    <span class="chart-val" id="chart-net-val">0ms</span>
-                    <canvas id="chart-net" class="system-chart"></canvas>
-                </div>
-            </div>
+                            <div id="chat-output" role="log" aria-live="polite" aria-label="AURA conversation" class="console-output chat-mode">
+                                <!-- Chat bubbles injected here -->
+                            </div>
 
-            <div class="panel" draggable="true">
-                <div class="panel-header drag-handle">MEDIA CONTROL</div>
-                <div class="spotify-panel">
-                    <div class="spotify-content">
-                        <div class="spotify-art"><svg style="width:24px;height:24px;fill:var(--cyan-mid);" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.5 0-4.5-2-4.5-4.5S9.5 7.5 12 7.5s4.5 2 4.5 4.5-2 4.5-4.5 4.5zm0-7.5c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg></div>
-                        <div class="spotify-info">
-                            <div class="sp-title">Awaiting Input...</div>
-                            <div class="sp-artist">SYSTEM MEDIA</div>
+                            <div id="attachment-preview" class="attachment-preview"></div>
+
+                            <div class="waveform-strip" aria-hidden="true">
+                                <div id="visualizer" class="visualizer"><!-- bars via JS --></div>
+                            </div>
+
+                            <div class="quick-actions" aria-label="Quick actions">
+                                <button class="qa-btn" id="qa-read-screen" title="Read Screen">
+                                    <svg viewBox="0 0 24 24"><path d="M2 12h20M12 2v20M5 5l14 14M19 5L5 19"/></svg>
+                                    <span>Read screen</span>
+                                </button>
+                                <button class="qa-btn" id="qa-lock" title="Lock System">
+                                    <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                                    <span>Lock</span>
+                                </button>
+                                <button class="qa-btn" id="qa-web" title="Web Search">
+                                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+                                    <span>Web</span>
+                                </button>
+                                <button class="qa-btn" id="qa-scan" title="Threat Scan">
+                                    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    <span>Scan</span>
+                                </button>
+                            </div>
+
+                            <div class="input-row">
+                                <button id="btn-attach" class="icon-btn input-icon" title="Attach file or image">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                                    </svg>
+                                </button>
+                                <input type="file" id="file-upload" accept="image/*,.txt,.md,.py,.json,.csv,.js,.css,.html" multiple style="display: none;">
+                                <input type="text" id="command-input" aria-label="Message AURA" aria-autocomplete="list" placeholder="Message AURA…" autocomplete="off">
+                                <button id="voice-btn" aria-label="Activate voice input" aria-pressed="false" class="voice-orb state-idle" title="Voice input (Ctrl+M)">
+                                    <span class="orb-ring ring-a" aria-hidden="true"></span>
+                                    <span class="orb-ring ring-b" aria-hidden="true"></span>
+                                    <svg class="orb-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/></svg>
+                                    <span class="core-status">ONLINE</span>
+                                </button>
+                            </div>
+                            <div id="token-counter" class="token-counter">~0 tokens</div>
+                        </div>
+
+                        <aside class="chat-rail">
+                            <div class="rail-card card schedule-card">
+                                <div class="card-header">
+                                    <span>Schedule</span>
+                                </div>
+                                <div class="schedule-list" id="schedule-list"></div>
+                                <div class="schedule-add">
+                                    <input type="text" id="sched-time" placeholder="HH:MM" maxlength="5">
+                                    <input type="text" id="sched-event" placeholder="Reminder…">
+                                    <button class="qa-btn compact" id="btn-add-sched">ADD</button>
+                                </div>
+                            </div>
+
+                            <div class="rail-card card media-card">
+                                <div class="card-header"><span>Now Playing</span></div>
+                                <div class="spotify-panel">
+                                    <div class="spotify-content">
+                                        <div class="spotify-art">
+                                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.5 0-4.5-2-4.5-4.5S9.5 7.5 12 7.5s4.5 2 4.5 4.5-2 4.5-4.5 4.5zm0-7.5c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                                        </div>
+                                        <div class="spotify-info">
+                                            <div class="sp-title">Awaiting input…</div>
+                                            <div class="sp-artist">SYSTEM MEDIA</div>
+                                        </div>
+                                    </div>
+                                    <div class="spotify-controls">
+                                        <button class="sp-btn" id="sp-prev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+                                        <button class="sp-btn" id="sp-play" aria-label="Play / pause"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+                                        <button class="sp-btn" id="sp-next" aria-label="Next track"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </aside>
+
+                    </div>
+                </section>
+
+                <!-- ══════════ VIEW: SYSTEM ══════════ -->
+                <section class="view" id="view-system" data-title="System">
+                    <div class="card-grid">
+
+                        <div class="card diagnostics-panel">
+                            <div class="card-header"><span>System Diagnostics</span><span class="stale-tag">STALE</span></div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>Neural load (CPU)</span><span id="load-val">--%</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="load-fill"></div></div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>Memory</span><span id="mem-val">--%</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="mem-fill"></div></div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>Uplink (Wi-Fi)</span><span id="uplink-val">--%</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="uplink-fill"></div></div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>Power cell</span><span id="power-val">--%</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="power-fill"></div></div>
+                            </div>
+                        </div>
+
+                        <div class="card thermals-panel">
+                            <div class="card-header"><span>Hardware Thermals</span><span class="stale-tag">STALE</span></div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>CPU temp</span><span id="cpu-temp-val">--°C</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="cpu-temp-fill"></div></div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>CPU fan</span><span id="cpu-fan-val">--</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="cpu-fan-fill"></div></div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>GPU temp</span><span id="gpu-temp-val">--°C</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="gpu-temp-fill"></div></div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>GPU memory</span><span id="gpu-mem-val">-- MB</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="gpu-mem-fill"></div></div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>GPU fan</span><span id="gpu-fan-val">AUTO</span></div>
+                            </div>
+                        </div>
+
+                        <div class="card charts-panel">
+                            <div class="card-header"><span>Live Telemetry</span></div>
+                            <div class="gauges-row">
+                                <div class="gauge-container" id="gauge-cpu">
+                                    <svg viewBox="0 0 120 70" class="gauge-svg">
+                                        <path d="M10 65 A50 50 0 0 1 110 65" class="gauge-track"/>
+                                        <path d="M10 65 A50 50 0 0 1 110 65" class="gauge-fill" id="gauge-cpu-arc"/>
+                                        <text class="gauge-label" x="60" y="55" id="gauge-cpu-text">0%</text>
+                                        <text class="gauge-sublabel" x="60" y="68">CPU</text>
+                                    </svg>
+                                    <div class="gauge-sparkline"><svg viewBox="0 0 120 20" id="gauge-cpu-spark"></svg></div>
+                                </div>
+                                <div class="gauge-container" id="gauge-mem">
+                                    <svg viewBox="0 0 120 70" class="gauge-svg">
+                                        <path d="M10 65 A50 50 0 0 1 110 65" class="gauge-track"/>
+                                        <path d="M10 65 A50 50 0 0 1 110 65" class="gauge-fill" id="gauge-mem-arc"/>
+                                        <text class="gauge-label" x="60" y="55" id="gauge-mem-text">0%</text>
+                                        <text class="gauge-sublabel" x="60" y="68">MEM</text>
+                                    </svg>
+                                    <div class="gauge-sparkline"><svg viewBox="0 0 120 20" id="gauge-mem-spark"></svg></div>
+                                </div>
+                                <div class="gauge-container" id="gauge-net">
+                                    <svg viewBox="0 0 120 70" class="gauge-svg">
+                                        <path d="M10 65 A50 50 0 0 1 110 65" class="gauge-track"/>
+                                        <path d="M10 65 A50 50 0 0 1 110 65" class="gauge-fill" id="gauge-net-arc"/>
+                                        <text class="gauge-label" x="60" y="55" id="gauge-net-text">0%</text>
+                                        <text class="gauge-sublabel" x="60" y="68">NET</text>
+                                    </svg>
+                                    <div class="gauge-sparkline"><svg viewBox="0 0 120 20" id="gauge-net-spark"></svg></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card ai-core-panel">
+                            <div class="card-header"><span>AURA Core</span></div>
+                            <div class="ai-stat-grid">
+                                <div class="ai-stat"><span class="ai-stat-label">Model</span><span class="ai-stat-value accent" id="ai-model-val">---</span></div>
+                                <div class="ai-stat"><span class="ai-stat-label">Tokens</span><span class="ai-stat-value" id="ai-tokens-val">0.0/s</span></div>
+                                <div class="ai-stat"><span class="ai-stat-label">Vision</span><span class="ai-stat-value" id="ai-vision-val">0.0s</span></div>
+                                <div class="ai-stat"><span class="ai-stat-label">Tools</span><span class="ai-stat-value" id="ai-tools-val">0.0s</span></div>
+                                <div class="ai-stat"><span class="ai-stat-label">VRAM</span><span class="ai-stat-value" id="ai-vram-val">0.0GB</span></div>
+                            </div>
+                        </div>
+
+                        <div class="card process-panel span-2">
+                            <div class="card-header"><span>Active Processes</span><span class="stale-tag">STALE</span></div>
+                            <div class="process-list" id="process-list"></div>
+                        </div>
+
+                        <div class="card log-panel span-2">
+                            <div class="card-header">
+                                <span>System Logs</span>
+                                <button class="qa-btn compact" id="btn-log-refresh">REFRESH</button>
+                            </div>
+                            <div class="log-output" id="log-output"></div>
+                        </div>
+
+                    </div>
+                </section>
+
+                <!-- ══════════ VIEW: SECURITY ══════════ -->
+                <section class="view" id="view-security" data-title="Security">
+                    <div class="card-grid">
+
+                        <div class="card security-panel">
+                            <div class="card-header">
+                                <span>Local Security Center</span>
+                                <button class="qa-btn compact" id="btn-sec-refresh">REFRESH</button>
+                            </div>
+                            <div class="threat-row" id="threat-box">
+                                <div class="threat-block">
+                                    <span class="stat-label">Threat level</span>
+                                    <span class="threat-clear stat-big" id="threat-val">CLEAR</span>
+                                </div>
+                                <div class="threat-block">
+                                    <span class="stat-label">Status</span>
+                                    <span class="stat-small" id="threat-msg">0 anomalies detected</span>
+                                </div>
+                            </div>
+                            <div class="diag-item">
+                                <div class="diag-label"><span>Risk level</span><span id="sec-risk-val">LOW</span></div>
+                            </div>
+                            <div id="sec-alerts-container" class="sec-alerts"></div>
+                            <pre id="sec-details-container" class="sec-details">Initializing security sweep…</pre>
+                        </div>
+
+                        <div class="card permissions-panel">
+                            <div class="card-header">
+                                <span>Security Clearance</span>
+                                <label class="toggle-label" title="Auto-approve MEDIUM risk tools">
+                                    <input type="checkbox" id="trusted-mode-toggle"> Trusted mode
+                                </label>
+                            </div>
+                            <div class="permissions-list" id="permissions-list">
+                                <div class="empty-note">NO PENDING ACTIONS</div>
+                            </div>
+                        </div>
+
+                        <div class="card network-panel">
+                            <div class="card-header">
+                                <span>Network Grid</span>
+                                <button class="qa-btn compact" id="btn-net-scan">SCAN</button>
+                            </div>
+                            <div class="network-canvas-container">
+                                <svg id="network-svg"></svg>
+                            </div>
+                        </div>
+
+                        <div class="card webcam-panel">
+                            <div class="card-header"><span>Optical Sensor</span></div>
+                            <div class="webcam-container">
+                                <video id="webcam-video" autoplay muted playsinline></video>
+                                <canvas id="webcam-canvas"></canvas>
+                                <div class="webcam-offline" id="webcam-offline">Camera inactive</div>
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+
+                <!-- ══════════ VIEW: FILES ══════════ -->
+                <section class="view" id="view-files" data-title="Files">
+                    <div class="card-grid two-col">
+
+                        <div class="card fs-panel">
+                            <div class="card-header"><span>File Explorer</span></div>
+                            <div class="fs-controls">
+                                <button id="fs-up-btn" class="qa-btn compact">UP</button>
+                                <div id="fs-path" class="fs-path">ROOT</div>
+                            </div>
+                            <div class="fs-list" id="fs-list"></div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header"><span>Screen Captures</span></div>
+                            <div class="screen-preview empty" id="screen-preview-container" role="button" aria-label="View recent screen capture" tabindex="0">
+                                <span class="screen-preview-empty-text">No recent captures</span>
+                                <img id="screen-preview-img" class="screen-preview-img" alt="Recent screen capture">
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+
+                <!-- ══════════ VIEW: MEMORY ══════════ -->
+                <section class="view" id="view-memory" data-title="Memory">
+                    <div class="card-grid">
+                        <div class="card memory-panel span-2">
+                            <div class="card-header"><span>Memory Archive</span></div>
+                            <input type="search" id="memory-search" class="text-input" placeholder="Search memories…">
+                            <div class="memory-list" id="memory-list"></div>
                         </div>
                     </div>
-                    <div class="spotify-controls">
-                        <button class="sp-btn" id="sp-prev"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
-                        <button class="sp-btn" id="sp-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
-                        <button class="sp-btn" id="sp-next"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="panel waveform-panel" draggable="true">
-                <div class="panel-header drag-handle">WAVEFORM</div>
-                <div id="visualizer" class="visualizer">
-                    <!-- Bars generated by JS -->
-                </div>
-            </div>
-        </div>
-    </main>
+                </section>
 
-    <!-- KEYBOARD SHORTCUTS MODAL -->
-    <div class="modal-overlay" id="shortcuts-modal">
+                <!-- ══════════ VIEW: SETTINGS ══════════ -->
+                <section class="view" id="view-settings" data-title="Settings">
+                    <div class="card-grid">
+
+                        <div class="card">
+                            <div class="card-header"><span>Appearance</span></div>
+                            <p class="settings-hint">Accent theme used across the interface.</p>
+                            <div class="theme-selector">
+                                <button type="button" class="theme-dot theme-dot-default" data-theme="" aria-label="Default cyan theme" aria-pressed="true"></button>
+                                <button type="button" class="theme-dot theme-dot-crimson" data-theme="theme-crimson" aria-label="Crimson theme" aria-pressed="false"></button>
+                                <button type="button" class="theme-dot theme-dot-emerald" data-theme="theme-emerald" aria-label="Emerald theme" aria-pressed="false"></button>
+                                <button type="button" class="theme-dot theme-dot-violet" data-theme="theme-violet" aria-label="Violet theme" aria-pressed="false"></button>
+                            </div>
+                        </div>
+
+                        <div class="card modules-panel">
+                            <div class="card-header"><span>Modules</span></div>
+                            <div class="module-item mod-btn" id="wake-word-toggle" role="switch" aria-checked="false" tabindex="0">
+                                <span>Wake word ("Hey Aura")</span><span class="status-idle module-status" id="wake-word-status">OFF</span>
+                            </div>
+                            <div class="module-item"><span>Voice core</span><span class="status-active module-status">ACTIVE</span></div>
+                            <div class="module-item"><span>Schedule engine</span><span class="status-active module-status">ACTIVE</span></div>
+                            <div class="module-item"><span>Home grid (WiZ)</span><span class="status-active module-status">READY</span></div>
+                            <div class="module-item"><span>Archive sync</span><span class="status-sync module-status">IDLE</span></div>
+                        </div>
+
+                        <div class="card proactive-panel">
+                            <div class="card-header">
+                                <span>Proactive Intelligence</span>
+                                <button id="toggle-proactive" class="qa-btn compact accent-text">ON</button>
+                            </div>
+                            <p class="settings-hint">AURA warns you when thresholds are crossed.</p>
+                            <div class="diag-item slider-item">
+                                <div class="diag-label"><span>CPU limit</span><span id="thresh-cpu-val">90%</span></div>
+                                <input type="range" id="thresh-cpu" min="50" max="100" value="90">
+                            </div>
+                            <div class="diag-item slider-item">
+                                <div class="diag-label"><span>GPU temp</span><span id="thresh-gpu-val">85°C</span></div>
+                                <input type="range" id="thresh-gpu" min="50" max="100" value="85">
+                            </div>
+                            <div class="diag-item slider-item">
+                                <div class="diag-label"><span>Battery minimum</span><span id="thresh-batt-val">20%</span></div>
+                                <input type="range" id="thresh-batt" min="5" max="50" value="20">
+                            </div>
+                            <button id="btn-save-proactive" class="qa-btn wide">SAVE CONFIG</button>
+                        </div>
+
+                        <div class="card shortcuts-list-card">
+                            <div class="card-header"><span>Keyboard Shortcuts</span></div>
+                            <div class="shortcut-item"><span class="shortcut-desc">Clear console</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span></div>
+                            <div class="shortcut-item"><span class="shortcut-desc">Toggle voice core</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span></div>
+                            <div class="shortcut-item"><span class="shortcut-desc">Close dialogs</span><span class="shortcut-keys"><span class="key">ESC</span></span></div>
+                        </div>
+
+                    </div>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- ═══════════════ TOASTS ═══════════════ -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- ═══════════════ KEYBOARD SHORTCUTS MODAL ═══════════════ -->
+    <div class="modal-overlay" id="shortcuts-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
         <div class="modal">
             <div class="modal-header">
-                <div class="modal-title">SYSTEM SHORTCUTS</div>
-                <button class="modal-close" id="close-shortcuts">×</button>
+                <div class="modal-title">Keyboard Shortcuts</div>
+                <button class="modal-close" id="close-shortcuts" aria-label="Close">×</button>
             </div>
-            <div class="shortcut-item">
-                <span class="shortcut-desc">Clear Console</span>
-                <span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span>
+            <div class="shortcut-item"><span class="shortcut-desc">Clear console</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span></div>
+            <div class="shortcut-item"><span class="shortcut-desc">Toggle voice core</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span></div>
+            <div class="shortcut-item"><span class="shortcut-desc">Close dialogs</span><span class="shortcut-keys"><span class="key">ESC</span></span></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════ CONFIRMATION MODAL ═══════════════ -->
+    <div class="modal-overlay" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="modal modal-narrow">
+            <div class="modal-header">
+                <div class="modal-title" id="confirm-title">Confirm</div>
+                <button class="modal-close" id="confirm-x" aria-label="Close">×</button>
             </div>
-            <div class="shortcut-item">
-                <span class="shortcut-desc">Toggle Voice Core</span>
-                <span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span>
-            </div>
-            <div class="shortcut-item">
-                <span class="shortcut-desc">Close Shortcuts</span>
-                <span class="shortcut-keys"><span class="key">ESC</span></span>
+            <p class="confirm-message" id="confirm-message">Are you sure?</p>
+            <div class="confirm-actions">
+                <button class="qa-btn" id="confirm-cancel">CANCEL</button>
+                <button class="qa-btn danger" id="confirm-ok">CONFIRM</button>
             </div>
         </div>
     </div>
 
-    <!-- Notification Drawer -->
-    <div id="notif-drawer" class="notif-drawer">
+    <!-- ═══════════════ NOTIFICATION DRAWER ═══════════════ -->
+    <div id="notif-drawer" class="notif-drawer" role="dialog" aria-label="Notifications">
         <div class="drawer-header">
             <span>NOTIFICATIONS</span>
-            <button id="close-drawer" style="background:none; border:none; color:var(--cyan); cursor:pointer; font-size:16px;">×</button>
+            <button id="close-drawer" class="icon-btn" aria-label="Close notifications">×</button>
         </div>
-        <div id="notif-list" class="notif-list">
-            <!-- Notifications appear here -->
-        </div>
+        <div id="notif-list" class="notif-list"></div>
     </div>
 
-    <!-- Screenshot Lightbox -->
-    <div id="lightbox-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:20000; justify-content:center; align-items:center; cursor:pointer;">
-        <img id="lightbox-img" style="max-width:90%; max-height:90%; border:2px solid var(--cyan); box-shadow:0 0 20px var(--cyan);">
+    <!-- ═══════════════ SCREENSHOT LIGHTBOX ═══════════════ -->
+    <div id="lightbox-overlay">
+        <img id="lightbox-img" alt="Screenshot preview">
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <!-- Self-hosted vendor libraries -->
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/purify.min.js"></script>
+    <script src="vendor/highlight.min.js"></script>
+    <script src="vendor/d3.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

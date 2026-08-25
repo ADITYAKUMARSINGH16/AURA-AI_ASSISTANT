@@ -8,7 +8,7 @@ class AudioEngine {
         this.masterGain.gain.value = 0.3;
         this.masterGain.connect(this.ctx.destination);
     }
-    
+
     playTyping() {
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const osc = this.ctx.createOscillator();
@@ -29,35 +29,19 @@ class AudioEngine {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'sine';
-        osc.frequency.value = 55; // Deep bass hum
+        osc.frequency.value = 55;
         gain.gain.value = 0.05;
         osc.connect(gain);
         gain.connect(this.masterGain);
         osc.start();
-        // subtle LFO for breathing effect
         const lfo = this.ctx.createOscillator();
         lfo.type = 'sine';
-        lfo.frequency.value = 0.2; // slow breathe
+        lfo.frequency.value = 0.2;
         const lfoGain = this.ctx.createGain();
         lfoGain.gain.value = 0.02;
         lfo.connect(lfoGain);
         lfoGain.connect(gain.gain);
         lfo.start();
-    }
-
-    playClick() {
-        if(this.ctx.state === 'suspended') this.ctx.resume();
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(600, this.ctx.currentTime + 0.1);
-        gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
-        osc.connect(gain);
-        gain.connect(this.masterGain);
-        osc.start();
-        osc.stop(this.ctx.currentTime + 0.1);
     }
 }
 
@@ -72,9 +56,116 @@ document.addEventListener('click', () => {
 }, { once: true });
 
 // ═══════════════════════════════════════════════════════════
-// UI & BOOT LOGIC
+// CORE HELPERS
+// ═══════════════════════════════════════════════════════════
+
+// Escape server-controlled strings before any innerHTML insertion (XSS guard)
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// ── Connection monitor: drives the sidebar ONLINE/OFFLINE chip ──
+const ConnectionMonitor = {
+    el: null,
+    fails: 0,
+    online: true,
+    announced: false,
+    init() {
+        this.el = document.getElementById('conn-status');
+    },
+    record(ok) {
+        if (ok) {
+            if (!this.online && this.announced) {
+                showToast('CONNECTION RESTORED', 'Backend is reachable again.', 'success');
+            }
+            this.fails = 0;
+            this.online = true;
+            this.announced = false;
+            this.el?.classList.remove('offline');
+            this.el?.classList.add('online');
+            const t = this.el?.querySelector('.conn-text');
+            if (t) t.textContent = 'ONLINE';
+        } else {
+            this.fails++;
+            if (this.online && this.fails >= 2) {
+                this.online = false;
+                this.announced = true;
+                this.el?.classList.add('offline');
+                this.el?.classList.remove('online');
+                const t = this.el?.querySelector('.conn-text');
+                if (t) t.textContent = 'OFFLINE';
+                showToast('CONNECTION LOST', 'Cannot reach the AURA backend.', 'error');
+            }
+        }
+    },
+    get isOffline() { return !this.online; }
+};
+
+// Central fetch wrapper: request timeout + connection tracking.
+// Long-running endpoints pass a larger `timeout` (chat can take minutes
+// when the agent loops through tools).
+async function api(path, { method = 'GET', headers, body, timeout = 15000 } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error('timeout')), timeout);
+    try {
+        const res = await fetch(path, { method, headers, body, signal: controller.signal });
+        ConnectionMonitor.record(true);
+        return res;
+    } catch (err) {
+        ConnectionMonitor.record(false);
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// Mark a card's data as stale when its poll keeps failing
+function setStale(cardEl, stale) {
+    cardEl?.classList.toggle('stale', !!stale);
+}
+
+function isViewActive(name) {
+    return document.getElementById('view-' + name)?.classList.contains('active') || false;
+}
+
+// ── Confirmation modal for destructive actions ──
+const confirmModal = document.getElementById('confirm-modal');
+let confirmResolve = null;
+
+function confirmAction({ title = 'Confirm action', message = 'Are you sure?', okLabel = 'CONFIRM' } = {}) {
+    return new Promise((resolve) => {
+        confirmResolve = resolve;
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-message').textContent = message;
+        const okBtn = document.getElementById('confirm-ok');
+        okBtn.textContent = okLabel;
+        confirmModal.classList.add('active');
+        okBtn.focus();
+    });
+}
+
+function settleConfirm(result) {
+    if (confirmResolve) {
+        confirmResolve(result);
+        confirmResolve = null;
+    }
+    confirmModal.classList.remove('active');
+}
+
+document.getElementById('confirm-ok')?.addEventListener('click', () => settleConfirm(true));
+document.getElementById('confirm-cancel')?.addEventListener('click', () => settleConfirm(false));
+document.getElementById('confirm-x')?.addEventListener('click', () => settleConfirm(false));
+
+// ═══════════════════════════════════════════════════════════
+// BOOT SEQUENCE (signature moment — kept short)
 // ═══════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
+    ConnectionMonitor.init();
     startBootSequence();
 });
 
@@ -82,32 +173,23 @@ function startBootSequence() {
     const bootOverlay = document.getElementById('boot-overlay');
     const bootProgress = document.getElementById('boot-progress-bar');
     const bootLinesContainer = document.getElementById('boot-lines');
-    
+
     const bootLines = [
-        { text: '> AURA KERNEL v2.0 loading...', delay: 200 },
-        { text: '> Neural mesh handshake ............... ', suffix: '<span class="bok">[OK]</span>', delay: 300 },
-        { text: '> Voice core calibrated ............... ', suffix: '<span class="bok">[OK]</span>', delay: 250 },
-        { text: '> Sensor array online ................. ', suffix: '<span class="bok">[OK]</span>', delay: 300 },
-        { text: '> Threat assessment ................... ', suffix: '<span class="bok">[CLEAR]</span>', delay: 250 },
-        { text: '> All subsystems nominal.', delay: 200 }
+        { text: '> AURA KERNEL v2.0 loading...', delay: 160 },
+        { text: '> Neural mesh handshake ............... ', suffix: '<span class="bok">[OK]</span>', delay: 220 },
+        { text: '> Voice core calibrated ............... ', suffix: '<span class="bok">[OK]</span>', delay: 220 },
+        { text: '> Sensor array online ................. ', suffix: '<span class="bok">[OK]</span>', delay: 220 },
+        { text: '> All subsystems nominal.', delay: 180 }
     ];
-    
+
     let lineIndex = 0;
-    
+
     function renderLine() {
         if (lineIndex >= bootLines.length) {
             if(bootProgress) bootProgress.style.width = '100%';
             setTimeout(() => {
-                if(bootOverlay) {
-                    bootOverlay.classList.add('dismissed');
-                    setTimeout(() => bootOverlay.style.display = 'none', 500);
-                }
-                document.querySelectorAll('.hud-overlay').forEach((el, idx) => {
-                    setTimeout(() => el.classList.add('visible'), idx * 300);
-                });
-                initParticles();
-                animateOverlays();
-            }, 500);
+                if(bootOverlay) bootOverlay.classList.add('dismissed');
+            }, 400);
             return;
         }
 
@@ -119,201 +201,103 @@ function startBootSequence() {
         if(audioSys) audioSys.playTyping();
 
         if(bootProgress) bootProgress.style.width = ((lineIndex + 1) / bootLines.length * 100) + '%';
-        
+
         lineIndex++;
         setTimeout(renderLine, l.delay);
     }
-    
-    // Total cinematic duration ~3s
-    setTimeout(renderLine, 800);
+
+    setTimeout(renderLine, 600);
 }
 
 // ═══════════════════════════════════════════════════════════
-// PARTICLE CANVAS BACKGROUND
+// VIEW ROUTER (sidebar navigation)
 // ═══════════════════════════════════════════════════════════
-function initParticles() {
-    const canvas = document.getElementById('particle-bg');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    
-    let w = canvas.width = window.innerWidth;
-    let h = canvas.height = window.innerHeight;
-    
-    window.addEventListener('resize', () => {
-        w = canvas.width = window.innerWidth;
-        h = canvas.height = window.innerHeight;
+const VIEW_NAMES = ['chat', 'system', 'security', 'files', 'memory', 'settings'];
+
+function showView(name) {
+    if (!VIEW_NAMES.includes(name)) name = 'chat';
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+    document.querySelectorAll('.nav-item').forEach(btn => {
+        const on = btn.dataset.view === name;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', String(on));
     });
-
-    let mouseX = w / 2;
-    let mouseY = h / 2;
-    window.addEventListener('mousemove', (e) => {
-        mouseX = e.clientX;
-        mouseY = e.clientY;
-    });
-
-    const particles = [];
-    const numParticles = 60;
-    
-    for(let i=0; i<numParticles; i++) {
-        particles.push({
-            x: Math.random() * w,
-            y: Math.random() * h,
-            vx: (Math.random() - 0.5) * 0.5,
-            vy: (Math.random() - 0.5) * 0.5,
-            radius: Math.random() * 2 + 1
-        });
-    }
-
-    function animate() {
-        requestAnimationFrame(animate);
-        ctx.clearRect(0, 0, w, h);
-        
-        ctx.fillStyle = 'rgba(0, 240, 255, 0.3)';
-        ctx.strokeStyle = 'rgba(0, 240, 255, 0.1)';
-        
-        for(let i=0; i<numParticles; i++) {
-            const p = particles[i];
-            // Parallax offset
-            const dxParallax = (mouseX - w / 2) * 0.005;
-            const dyParallax = (mouseY - h / 2) * 0.005;
-            
-            p.x += p.vx + dxParallax;
-            p.y += p.vy + dyParallax;
-            
-            if(p.x < 0) p.x = w;
-            if(p.x > w) p.x = 0;
-            if(p.y < 0) p.y = h;
-            if(p.y > h) p.y = 0;
-            
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-            ctx.fill();
-            
-            for(let j=i+1; j<numParticles; j++) {
-                const p2 = particles[j];
-                const dx = p.x - p2.x;
-                const dy = p.y - p2.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                
-                if(dist < 120) {
-                    ctx.beginPath();
-                    ctx.moveTo(p.x, p.y);
-                    ctx.lineTo(p2.x, p2.y);
-                    ctx.stroke();
-                }
-            }
-            
-            // Magnetic repulsion from mouse
-            const mdx = p.x - mouseX;
-            const mdy = p.y - mouseY;
-            const mDist = Math.sqrt(mdx*mdx + mdy*mdy);
-            if (mDist < 150) {
-                const force = (150 - mDist) / 150;
-                p.x += (mdx / mDist) * force * 2;
-                p.y += (mdy / mDist) * force * 2;
-            }
-        }
-    }
-    animate();
+    const section = document.getElementById('view-' + name);
+    const titleEl = document.getElementById('view-title');
+    if (titleEl) titleEl.textContent = section?.dataset.title || name;
+    try { localStorage.setItem('aura-view', name); } catch (e) {}
+    // Lazy-init panels that own hardware/network resources
+    if (name === 'security') initWebcam();
 }
 
-// ═══════════════════════════════════════════════════════════
-// HUD OVERLAYS SCRAMBLE & GEOLOCATION
-// ═══════════════════════════════════════════════════════════
-function animateOverlays() {
-    const lat = document.getElementById('hud-lat');
-    const lng = document.getElementById('hud-lng');
-    let targetLat = '28.6139° N';
-    let targetLng = '77.2090° E';
-    
-    // Attempt Geolocation
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                const latNum = Math.abs(pos.coords.latitude).toFixed(4);
-                const lngNum = Math.abs(pos.coords.longitude).toFixed(4);
-                const latDir = pos.coords.latitude >= 0 ? 'N' : 'S';
-                const lngDir = pos.coords.longitude >= 0 ? 'E' : 'W';
-                targetLat = `${latNum}° ${latDir}`;
-                targetLng = `${lngNum}° ${lngDir}`;
-                scramble(lat, targetLat, 1000);
-                scramble(lng, targetLng, 1000);
-            },
-            (err) => console.warn("Geolocation blocked/failed, using fallback.")
-        );
-    }
-    
-    function scramble(el, targetStr, duration) {
-        if (!el) return;
-        const chars = '0123456789°NSWE';
-        let iterations = 0;
-        const maxIterations = duration / 30;
-        
-        const interval = setInterval(() => {
-            el.innerText = targetStr.split('').map((char, index) => {
-                if(index < (iterations / maxIterations) * targetStr.length) return targetStr[index];
-                if(char === ' ' || char === '.') return char;
-                return chars[Math.floor(Math.random() * chars.length)];
-            }).join('');
-            
-            if(iterations >= maxIterations) {
-                clearInterval(interval);
-                el.innerText = targetStr;
-            }
-            iterations++;
-        }, 30);
-    }
-    
-    setTimeout(() => scramble(lat, targetLat, 1000), 200);
-    setTimeout(() => scramble(lng, targetLng, 1000), 400);
-}
+document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => showView(btn.dataset.view));
+});
 
+// ═══════════════════════════════════════════════════════════
+// VOICE STATE (reactor orb recoloring)
+// ═══════════════════════════════════════════════════════════
 const terminalOutput = document.getElementById('terminal-output');
 const chatOutput = document.getElementById('chat-output');
+window.auraState = 'idle';
+
+function setAuraState(state) {
+    window.auraState = state;
+    const vBtn = document.getElementById('voice-btn');
+    const statusEl = vBtn?.querySelector('.core-status');
+    if(!vBtn || !statusEl) return;
+
+    vBtn.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking');
+    vBtn.classList.add(`state-${state}`);
+
+    let speed = 1.0;
+    switch(state) {
+        case 'idle': speed = 0.8; statusEl.textContent = 'ONLINE'; break;
+        case 'listening': speed = 1.8; statusEl.textContent = 'HEARING'; break;
+        case 'processing': speed = 2.5; statusEl.textContent = 'THINKING'; break;
+        case 'speaking': speed = 1.2; statusEl.textContent = 'SPEAKING'; break;
+    }
+    document.documentElement.style.setProperty('--ring-speed', speed);
+}
+
 const commandInput = document.getElementById('command-input');
 const voiceBtn = document.getElementById('voice-btn');
-const reactorContainer = document.querySelector('.reactor-container');
-const coreStatus = document.querySelector('.core-status');
 const visualizer = document.getElementById('visualizer');
-const wakeWordToggle = document.getElementById('wake-word-toggle');
-const wakeWordStatus = document.getElementById('wake-word-status');
 
 // Toggle between Terminal and Chat modes
 let currentMode = 'terminal';
 const btnModeTerm = document.getElementById('btn-mode-term');
 const btnModeChat = document.getElementById('btn-mode-chat');
 
-btnModeTerm.addEventListener('click', () => {
-    currentMode = 'terminal';
-    btnModeTerm.classList.add('active');
-    btnModeChat.classList.remove('active');
-    terminalOutput.style.display = 'flex';
-    chatOutput.style.display = 'none';
-    terminalOutput.scrollTop = terminalOutput.scrollHeight;
-});
+function setConsoleMode(mode) {
+    currentMode = mode;
+    const isTerm = mode === 'terminal';
+    btnModeTerm.classList.toggle('active', isTerm);
+    btnModeChat.classList.toggle('active', !isTerm);
+    btnModeTerm.setAttribute('aria-pressed', String(isTerm));
+    btnModeChat.setAttribute('aria-pressed', String(!isTerm));
+    terminalOutput.style.display = isTerm ? 'flex' : 'none';
+    chatOutput.style.display = isTerm ? 'none' : 'flex';
+    (isTerm ? terminalOutput : chatOutput).scrollTop = (isTerm ? terminalOutput : chatOutput).scrollHeight;
+}
 
-btnModeChat.addEventListener('click', () => {
-    currentMode = 'chat';
-    btnModeChat.classList.add('active');
-    btnModeTerm.classList.remove('active');
-    chatOutput.style.display = 'flex';
-    terminalOutput.style.display = 'none';
-    chatOutput.scrollTop = chatOutput.scrollHeight;
-});
+btnModeTerm.addEventListener('click', () => setConsoleMode('terminal'));
+btnModeChat.addEventListener('click', () => setConsoleMode('chat'));
 
-// Initialize clock
+// Initialize clock (system-local timezone)
 function updateClock() {
-    const now = new Date();
-    const timeString = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
     const clk = document.getElementById('hud-sys-clock');
-    if(clk) {
-        clk.textContent = timeString;
-        clk.classList.add('flash-cyan');
-        setTimeout(() => clk.classList.remove('flash-cyan'), 150);
-    }
+    if(clk) clk.textContent = new Date().toLocaleTimeString([], { hour12: false });
 }
 setInterval(updateClock, 1000);
 updateClock();
+
+// Restore last visited view
+(function restoreView() {
+    let saved = null;
+    try { saved = localStorage.getItem('aura-view'); } catch (e) {}
+    showView(VIEW_NAMES.includes(saved) ? saved : 'chat');
+})();
 
 // ═══════════════════════════════════════════════════════════
 // NOTIFICATION TOASTS
@@ -322,49 +306,49 @@ const toastContainer = document.getElementById('toast-container');
 
 function showToast(title, message, type = 'info') {
     const toast = document.createElement('div');
-    toast.className = `toast ${type === 'error' ? 'toast-error' : type === 'warning' ? 'toast-warning' : ''}`;
-    
+    toast.className =
+        type === 'error' ? 'toast toast-error' :
+        type === 'warning' ? 'toast toast-warning' :
+        type === 'success' ? 'toast toast-success' : 'toast';
+
     toast.innerHTML = `
-        <div class="toast-title">${title}</div>
-        <div class="toast-msg">${message}</div>
+        <div class="toast-title">${escapeHtml(title)}</div>
+        <div class="toast-msg">${escapeHtml(message)}</div>
     `;
-    
+
     toastContainer.appendChild(toast);
-    
-    // Auto dismiss
-    setTimeout(() => {
+
+    const dismiss = () => {
         toast.style.animation = 'toast-slide-out 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards';
         setTimeout(() => toast.remove(), 300);
-    }, 5000);
-    
-    // Click to dismiss
-    toast.addEventListener('click', () => {
-        toast.style.animation = 'toast-slide-out 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards';
-        setTimeout(() => toast.remove(), 300);
-    });
+    };
+    setTimeout(dismiss, 5000);
+    toast.addEventListener('click', dismiss);
 }
 
 // ═══════════════════════════════════════════════════════════
 // KEYBOARD SHORTCUTS
 // ═══════════════════════════════════════════════════════════
-const modalOverlay = document.getElementById('shortcuts-modal');
+const shortcutsModal = document.getElementById('shortcuts-modal');
 const btnShortcuts = document.getElementById('btn-shortcuts');
 const btnCloseShortcuts = document.getElementById('close-shortcuts');
 
 function toggleShortcuts() {
-    modalOverlay.classList.toggle('active');
+    shortcutsModal.classList.toggle('active');
 }
 
 btnShortcuts.addEventListener('click', toggleShortcuts);
-btnCloseShortcuts.addEventListener('click', () => modalOverlay.classList.remove('active'));
+btnCloseShortcuts.addEventListener('click', () => shortcutsModal.classList.remove('active'));
 
 document.addEventListener('keydown', (e) => {
-    // ESC to close modal
-    if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
-        modalOverlay.classList.remove('active');
+    if (e.key === 'Escape') {
+        if (confirmModal.classList.contains('active')) { settleConfirm(false); return; }
+        if (shortcutsModal.classList.contains('active')) { shortcutsModal.classList.remove('active'); return; }
+        if (document.getElementById('lightbox-overlay').classList.contains('open')) { document.getElementById('lightbox-overlay').classList.remove('open'); return; }
+        document.getElementById('notif-drawer')?.classList.remove('open');
         return;
     }
-    
+
     // Ctrl + L: Clear terminal/chat
     if (e.ctrlKey && e.key.toLowerCase() === 'l') {
         e.preventDefault();
@@ -372,7 +356,7 @@ document.addEventListener('keydown', (e) => {
         chatOutput.innerHTML = '';
         showToast('SYSTEM', 'Console cleared.', 'info');
     }
-    
+
     // Ctrl + M: Toggle Voice Core
     if (e.ctrlKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
@@ -383,7 +367,7 @@ document.addEventListener('keydown', (e) => {
 // ═══════════════════════════════════════════════════════════
 // WAVEFORM VISUALIZER
 // ═══════════════════════════════════════════════════════════
-const numBars = 20;
+const numBars = 24;
 for (let i = 0; i < numBars; i++) {
     const bar = document.createElement('div');
     bar.className = 'vis-bar';
@@ -413,83 +397,89 @@ let currentAudio = null;
 
 async function playTTS(text) {
     if (!text) return;
-    
+
+    setAuraState('speaking');
     clearInterval(visInterval);
-    
+
     try {
-        await fetch('/api/voice/speaking', {
+        await api('/api/voice/speaking', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({is_speaking: true})
         });
 
-        const response = await fetch(`/api/tts?text=${encodeURIComponent(text)}`);
+        const response = await api(`/api/tts?text=${encodeURIComponent(text)}`, { timeout: 30000 });
         if (!response.ok) throw new Error('TTS fetch failed');
-        
+
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
-        
+
         if (currentAudio) {
             currentAudio.pause();
         }
         const audio = new Audio(url);
         currentAudio = audio;
-        
+
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 64;
         }
-        
+
         if (audioCtx.state === 'suspended') await audioCtx.resume();
         if (source) source.disconnect();
-        
+
         source = audioCtx.createMediaElementSource(audio);
         source.connect(analyser);
         analyser.connect(audioCtx.destination);
-        
+
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        
+
         function draw() {
             animationId = requestAnimationFrame(draw);
             analyser.getByteFrequencyData(dataArray);
-            
+
             bars.forEach((bar, index) => {
                 let value = dataArray[index] || 0;
                 let percent = Math.max(10, (value / 255) * 100);
                 bar.style.height = `${percent}%`;
             });
         }
-        
+
         audio.onended = async () => {
             cancelAnimationFrame(animationId);
             bars.forEach(bar => bar.style.height = '10%');
             visInterval = setInterval(() => animateVisualizer(false), 100);
             URL.revokeObjectURL(url);
             currentAudio = null;
-            await fetch('/api/voice/speaking', {
+            window._lastPlaybackEnd = Date.now();
+            setAuraState('idle');
+            api('/api/voice/speaking', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({is_speaking: false})
-            });
+            }).catch(() => {});
             // Check if we should continue conversation
             if (window._continueConversation) {
                 window._continueConversation = false;
                 voiceBtn.click();
             }
         };
-        
+
         audio.play();
         draw();
-        
+
     } catch (e) {
         console.error("Audio Playback Error:", e);
         visInterval = setInterval(() => animateVisualizer(false), 100);
-        await fetch('/api/voice/speaking', {
+        currentAudio = null;
+        window._lastPlaybackEnd = Date.now();
+        setAuraState('idle');
+        api('/api/voice/speaking', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({is_speaking: false})
-        });
+        }).catch(() => {});
     }
 }
 
@@ -498,7 +488,6 @@ async function playTTS(text) {
 // ═══════════════════════════════════════════════════════════
 async function appendToTerminal(text, type = 'system') {
     if (!text) return;
-    
 
     text = text.replace(/\*\*(.*?)\*\*/g, '$1');
     text = text.replace(/(^|\n|\s)\*(?=\s)/g, '$1•');
@@ -519,25 +508,24 @@ async function appendToTerminal(text, type = 'system') {
     terminalOutput.appendChild(termDiv);
     terminalOutput.scrollTop = terminalOutput.scrollHeight;
 
-    // 2. Append to Chat View
-    if (type !== 'system' || true) { // Also show system msgs in chat for continuity
-        const chatDiv = document.createElement('div');
-        chatDiv.className = `chat-bubble bubble-${type === 'error' ? 'error' : type === 'user' ? 'user' : 'aura'}`;
-        chatDiv.textContent = text;
-        chatOutput.appendChild(chatDiv);
-        chatOutput.scrollTop = chatOutput.scrollHeight;
-    }
+    // 2. Append to Chat View (plain-text fallback; rich rendering
+    //    happens in the send flow for live responses)
+    const chatDiv = document.createElement('div');
+    chatDiv.className = `chat-bubble bubble-${type === 'error' ? 'error' : type === 'user' ? 'user' : 'aura'}`;
+    chatDiv.textContent = text;
+    chatOutput.appendChild(chatDiv);
+    chatOutput.scrollTop = chatOutput.scrollHeight;
 }
 
 async function loadHistory() {
     try {
-        const response = await fetch('/api/history');
+        const response = await api('/api/history');
         const history = await response.json();
-        
+
         if (Array.isArray(history) && history.length > 0) {
             terminalOutput.innerHTML = '';
             chatOutput.innerHTML = '';
-            
+
             for (const msg of history) {
                 let content = msg.content || '';
                 await appendToTerminal(content, msg.role === 'user' ? 'user' : 'aura');
@@ -549,7 +537,7 @@ async function loadHistory() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// COMMAND INPUT & VOICE & ATTACHMENTS
+// COMMAND INPUT, VOICE & ATTACHMENTS
 // ═══════════════════════════════════════════════════════════
 
 const btnAttach = document.getElementById('btn-attach');
@@ -559,7 +547,7 @@ let pendingAttachments = { images: [], file_texts: [] };
 
 if(btnAttach && fileUpload) {
     btnAttach.addEventListener('click', () => fileUpload.click());
-    
+
     fileUpload.addEventListener('change', async (e) => {
         const files = Array.from(e.target.files);
         for(let file of files) {
@@ -590,7 +578,7 @@ function rebuildAttachmentPreview() {
     pendingAttachments.images.forEach((b64, i) => {
         const pill = document.createElement('div');
         pill.className = 'attach-pill';
-        pill.innerHTML = `<img src="data:image/jpeg;base64,${b64}"> <span>Image</span> <button class="attach-remove" data-type="image" data-index="${i}">×</button>`;
+        pill.innerHTML = `<img src="data:image/jpeg;base64,${b64}" alt="attachment"> <span>Image</span> <button class="attach-remove" data-type="image" data-index="${i}" aria-label="Remove">×</button>`;
         attachmentPreview.appendChild(pill);
         pill.querySelector('.attach-remove').addEventListener('click', () => {
             pendingAttachments.images.splice(i, 1);
@@ -600,7 +588,7 @@ function rebuildAttachmentPreview() {
     pendingAttachments.file_texts.forEach((fileObj, i) => {
         const pill = document.createElement('div');
         pill.className = 'attach-pill';
-        pill.innerHTML = `📄 <span>${fileObj.name}</span> <button class="attach-remove" data-type="text" data-index="${i}">×</button>`;
+        pill.innerHTML = `<span>📄</span> <span>${escapeHtml(fileObj.name)}</span> <button class="attach-remove" data-type="text" data-index="${i}" aria-label="Remove">×</button>`;
         attachmentPreview.appendChild(pill);
         pill.querySelector('.attach-remove').addEventListener('click', () => {
             pendingAttachments.file_texts.splice(i, 1);
@@ -613,54 +601,163 @@ function clearAttachments() {
     pendingAttachments = { images: [], file_texts: [] };
     if(attachmentPreview) attachmentPreview.innerHTML = '';
 }
-commandInput.addEventListener('keypress', async (e) => {
-    if (e.key === 'Enter') {
+const commandHistory = [];
+let historyIndex = -1;
+
+commandInput.addEventListener('input', () => {
+    const tokenCounter = document.getElementById('token-counter');
+    if (tokenCounter) {
+        const tokens = Math.ceil(commandInput.value.length / 4);
+        tokenCounter.textContent = `~${tokens} tokens`;
+    }
+});
+
+function enhanceLatestBubble(rawText = null) {
+    const bubbles = chatOutput.querySelectorAll('.chat-bubble:not(.thinking)');
+    if (bubbles.length === 0) return;
+    const latest = bubbles[bubbles.length - 1];
+
+    // Add Timestamp
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'bubble-time';
+    const now = new Date();
+    timeSpan.textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    latest.appendChild(timeSpan);
+
+    // Add Copy Button
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-btn';
+    copyBtn.setAttribute('aria-label', 'Copy message');
+    copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+
+    const textToCopy = rawText !== null ? rawText : latest.textContent.replace(timeSpan.textContent, '').trim();
+
+    copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(textToCopy);
+        const originalHTML = copyBtn.innerHTML;
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.innerHTML = originalHTML; }, 1000);
+    });
+    latest.appendChild(copyBtn);
+}
+
+commandInput.addEventListener('keydown', async (e) => {
+    if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (commandHistory.length > 0) {
+            if (historyIndex === -1) historyIndex = commandHistory.length - 1;
+            else historyIndex = Math.max(0, historyIndex - 1);
+            commandInput.value = commandHistory[historyIndex];
+            commandInput.dispatchEvent(new Event('input'));
+        }
+    } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (historyIndex !== -1) {
+            historyIndex++;
+            if (historyIndex >= commandHistory.length) {
+                historyIndex = -1;
+                commandInput.value = '';
+            } else {
+                commandInput.value = commandHistory[historyIndex];
+            }
+            commandInput.dispatchEvent(new Event('input'));
+        }
+    } else if (e.key === 'Enter') {
         const text = commandInput.value.trim();
         if (!text) return;
-        
+
+        commandHistory.push(text);
+        historyIndex = -1;
+
         if (text.toLowerCase() === 'clear') {
             terminalOutput.innerHTML = '';
             chatOutput.innerHTML = '';
             commandInput.value = '';
+            commandInput.dispatchEvent(new Event('input'));
             return;
         }
 
         commandInput.value = '';
         commandInput.disabled = true;
+        commandInput.dispatchEvent(new Event('input'));
+
         await appendToTerminal(text, 'user');
-        
+        enhanceLatestBubble(text);
+
+        setAuraState('processing');
         clearInterval(visInterval);
         visInterval = setInterval(() => animateVisualizer(true), 100);
 
         try {
-            const payload = { 
+            const payload = {
                 message: text,
                 images: pendingAttachments.images.length > 0 ? pendingAttachments.images : null,
                 file_texts: pendingAttachments.file_texts.length > 0 ? pendingAttachments.file_texts : null
             };
             clearAttachments();
 
-            const response = await fetch('/api/chat', {
+            const thinkingDiv = document.createElement('div');
+            thinkingDiv.className = 'chat-bubble bubble-aura thinking';
+            thinkingDiv.innerHTML = '<span class="dot-pulse"></span><span class="dot-pulse d2"></span><span class="dot-pulse d3"></span>';
+            chatOutput.appendChild(thinkingDiv);
+            chatOutput.scrollTop = chatOutput.scrollHeight;
+
+            const response = await api('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                timeout: 300000 // agent may loop through tools for minutes
             });
+
+            if (!response.ok) throw new Error('Network response was not ok');
+
             const data = await response.json();
-            
+            const accumulatedText = (data && typeof data.response === 'string') ? data.response : '';
+
+            thinkingDiv.remove();
+            setAuraState('idle');
             clearInterval(visInterval);
             visInterval = setInterval(() => animateVisualizer(false), 100);
-            
-            if (data.response) {
-                playTTS(data.response);
-                await appendToTerminal(data.response, 'aura');
+
+            if (accumulatedText) {
+                const currentBubble = document.createElement('div');
+                currentBubble.className = 'chat-bubble bubble-aura';
+                chatOutput.appendChild(currentBubble);
+
+                if (window.marked && window.DOMPurify) {
+                    currentBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+                    if (window.hljs) {
+                        currentBubble.querySelectorAll('pre code').forEach((block) => {
+                            hljs.highlightElement(block);
+                        });
+                    }
+                } else {
+                    currentBubble.textContent = accumulatedText;
+                }
+                chatOutput.scrollTop = chatOutput.scrollHeight;
+
+                enhanceLatestBubble(accumulatedText);
+
+                const termDiv = document.createElement('div');
+                termDiv.className = 'aura-msg';
+                termDiv.textContent = accumulatedText;
+                terminalOutput.appendChild(termDiv);
+                terminalOutput.scrollTop = terminalOutput.scrollHeight;
+
+                playTTS(accumulatedText);
             } else {
                 await appendToTerminal('No response received.', 'error');
             }
         } catch (error) {
+            console.error('Chat error:', error);
+            setAuraState('idle');
             clearInterval(visInterval);
             visInterval = setInterval(() => animateVisualizer(false), 100);
-            await appendToTerminal('CONNECTION FAILED', 'error');
-            showToast('CONNECTION ERROR', 'Failed to reach backend.', 'error');
+            const msg = ConnectionMonitor.isOffline
+                ? 'CONNECTION FAILED — backend unreachable.'
+                : 'Request failed or timed out.';
+            await appendToTerminal(msg, 'error');
+            showToast('REQUEST FAILED', msg, 'error');
         }
 
         commandInput.disabled = false;
@@ -673,29 +770,27 @@ voiceBtn.addEventListener('click', async () => {
     if (currentAudio) {
         currentAudio.pause();
         currentAudio.dispatchEvent(new Event('ended')); // Trigger cleanup
-        fetch('/api/voice/stop', { method: 'POST' });
+        api('/api/voice/stop', { method: 'POST' }).catch(() => {});
     }
 
-    if (reactorContainer.classList.contains('listening')) return;
-    
-    reactorContainer.classList.add('listening');
-    coreStatus.textContent = 'LISTENING...';
+    if (window.auraState === 'listening') return;
+    setAuraState('listening');
     commandInput.disabled = true;
-    showToast('MIC ACTIVE', 'Voice core listening...', 'info');
-    
+    voiceBtn.setAttribute('aria-pressed', 'true');
+
     // Start Live Mic Visualization
     startMicVisualization();
-    
+
     clearInterval(visInterval);
     visInterval = setInterval(() => animateVisualizer(true), 100);
 
     try {
-        const response = await fetch('/api/voice/listen', { method: 'POST' });
+        const response = await api('/api/voice/listen', { method: 'POST', timeout: 60000 });
         const data = await response.json();
-        
-        reactorContainer.classList.remove('listening');
+
         stopMicVisualization();
-        coreStatus.textContent = 'ONLINE';
+        setAuraState('idle');
+        voiceBtn.setAttribute('aria-pressed', 'false');
         clearInterval(visInterval);
         visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
@@ -713,13 +808,14 @@ voiceBtn.addEventListener('click', async () => {
             await appendToTerminal(data.message || 'VOICE ERROR', 'error');
         }
     } catch (error) {
-        reactorContainer.classList.remove('listening');
         stopMicVisualization();
-        coreStatus.textContent = 'ONLINE';
+        setAuraState('idle');
+        voiceBtn.setAttribute('aria-pressed', 'false');
         clearInterval(visInterval);
         visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
         await appendToTerminal('MIC CONNECTION FAILED', 'error');
+        showToast('VOICE ERROR', 'Could not reach the voice service.', 'error');
     }
 });
 
@@ -730,43 +826,50 @@ let micAnalyser = null;
 let micDataArray = null;
 let micAnimFrame = null;
 
+// Anti-echo guard: never start a listening session while AURA is speaking
+// or within 2s of her finishing - otherwise the mic captures her own voice.
+function canStartListening() {
+    const settled = Date.now() - (window._lastPlaybackEnd || 0) > 2000;
+    return !currentAudio && window.auraState !== 'listening' && settled;
+}
+
 async function startMicVisualization() {
     try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const source = micAudioCtx.createMediaStreamSource(micStream);
+
         micAnalyser = micAudioCtx.createAnalyser();
-        micAnalyser.fftSize = 64; // Match TTS fftSize for bar counts
+        micAnalyser.fftSize = 256;
         source.connect(micAnalyser);
+
         micDataArray = new Uint8Array(micAnalyser.frequencyBinCount);
-        
-        const soundWave = document.querySelector('.sound-wave');
+        const micTimeArray = new Uint8Array(micAnalyser.fftSize);
+
         function renderMic() {
-            if(!reactorContainer.classList.contains('listening')) return;
+            if(window.auraState !== 'listening') return;
             micAnimFrame = requestAnimationFrame(renderMic);
+
             micAnalyser.getByteFrequencyData(micDataArray);
-            
-            // Draw to the waveform panel bars
             bars.forEach((bar, index) => {
                 let value = micDataArray[index] || 0;
                 let percent = Math.max(10, (value / 255) * 100);
                 bar.style.height = `${percent}%`;
             });
 
+            micAnalyser.getByteTimeDomainData(micTimeArray);
             let sum = 0;
-            for(let i=0; i<micDataArray.length; i++) sum += micDataArray[i];
-            let avg = sum / micDataArray.length;
-            let scale = 1 + (avg / 255) * 0.8; // Scale up to 1.8x
-            
-            // Adjust the CSS animation intensity based on volume
-            if (soundWave) {
-                soundWave.style.transform = `scale(${scale})`;
-                soundWave.style.borderColor = `rgba(255, 51, 85, ${0.5 + (avg/255)*0.5})`;
+            for(let i = 0; i < micTimeArray.length; i++) {
+                let val = (micTimeArray[i] - 128) / 128;
+                sum += val * val;
             }
+            let rms = Math.sqrt(sum / micTimeArray.length);
+
+            document.documentElement.style.setProperty('--ring-pulse', rms.toFixed(3));
         }
         renderMic();
     } catch(err) {
-        console.warn("Mic visualization failed, falling back to CSS", err);
+        console.warn("Mic visualization failed", err);
     }
 }
 
@@ -774,19 +877,13 @@ function stopMicVisualization() {
     if (micAnimFrame) cancelAnimationFrame(micAnimFrame);
     if (micStream) micStream.getTracks().forEach(t => t.stop());
     if (micAudioCtx && micAudioCtx.state !== 'closed') micAudioCtx.close();
-    
-    // Reset waveform bars
+
     bars.forEach(bar => bar.style.height = '10%');
-    
-    const soundWave = document.querySelector('.sound-wave');
-    if (soundWave) {
-        soundWave.style.transform = '';
-        soundWave.style.borderColor = '';
-    }
+    document.documentElement.style.setProperty('--ring-pulse', 0);
 }
 
 // ═══════════════════════════════════════════════════════════
-// SYSTEM CHARTS LOGIC
+// LIVE TELEMETRY (System view + topbar signal)
 // ═══════════════════════════════════════════════════════════
 const historySize = 30;
 const chartData = {
@@ -795,236 +892,218 @@ const chartData = {
     net: Array(historySize).fill(0)
 };
 
-function drawChart(canvasId, dataArray, color) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    
-    // Fit canvas to element size
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
-    
-    const w = canvas.width;
-    const h = canvas.height;
-    
-    ctx.clearRect(0, 0, w, h);
-    
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    
-    const step = w / (historySize - 1);
-    
-    for(let i = 0; i < historySize; i++) {
-        const val = dataArray[i]; // 0 to 100
-        const x = i * step;
-        const y = h - (val / 100 * h);
-        
-        ctx.lineTo(x, y);
+function updateGauge(id, pct) {
+    const arc = document.getElementById('gauge-'+id+'-arc');
+    if (!arc) return;
+    const offset = 157 * (1 - pct / 100);
+    arc.style.strokeDashoffset = offset;
+    const hue = pct < 60 ? 160 : pct < 80 ? 40 : 0;
+    arc.style.stroke = 'hsl('+hue+',100%,60%)';
+    arc.style.filter = 'drop-shadow(0 0 4px hsla('+hue+',100%,60%,0.8))';
+    const text = document.getElementById('gauge-'+id+'-text');
+    if (text) text.textContent = Math.round(pct)+'%';
+    // Sparkline update (last 30 values redrawn as SVG polyline)
+    const spark = document.getElementById('gauge-'+id+'-spark');
+    if (!spark) return;
+    const points = chartData[id].map((val, i) => {
+        const x = (i / (historySize - 1)) * 120;
+        const y = 19 - (Math.min(100, Math.max(0, val)) / 100) * 18;
+        return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    let polyline = spark.querySelector('polyline');
+    if (!polyline) {
+        polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        spark.appendChild(polyline);
     }
-    
-    ctx.lineTo(w, h);
-    ctx.closePath();
-    
-    // Gradient fill
-    const gradient = ctx.createLinearGradient(0, 0, 0, h);
-    gradient.addColorStop(0, color);
-    gradient.addColorStop(1, 'transparent');
-    
-    ctx.fillStyle = gradient;
-    ctx.fill();
-    
-    // Stroke line
-    ctx.beginPath();
-    for(let i = 0; i < historySize; i++) {
-        const val = dataArray[i];
-        const x = i * step;
-        const y = h - (val / 100 * h);
-        if(i===0) ctx.moveTo(x,y);
-        else ctx.lineTo(x,y);
-    }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    polyline.setAttribute('points', points);
 }
 
-// ═══════════════════════════════════════════════════════════
-// LIVE TELEMETRY
-// ═══════════════════════════════════════════════════════════
+function setDiag(fillId, valId, valueText, pct) {
+    const val = document.getElementById(valId);
+    const fill = document.getElementById(fillId);
+    if (val) val.textContent = valueText;
+    if (fill) fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+}
+
+let telemetryStaleCount = 0;
+
 async function updateTelemetry() {
-    try {
-        const response = await fetch('/api/telemetry');
-        if (!response.ok) return;
-        const data = await response.json();
-        
-        // Update raw numbers left panel
-        document.getElementById('load-val').textContent = `${data.cpu}%`;
-        document.querySelector('.diagnostics-panel .diag-item:nth-child(2) .diag-fill').style.width = `${data.cpu}%`;
-        
-        document.getElementById('mem-val').textContent = `${data.memory}%`;
-        document.querySelector('.diagnostics-panel .diag-item:nth-child(3) .diag-fill').style.width = `${data.memory}%`;
-        
-        // Update UPLINK block in hud-tr
-        const uplinkVal = document.getElementById('hud-signal');
-        if(uplinkVal) {
-            let sigStr = "";
-            let p = Math.round((data.uplink / 100) * 8);
-            for(let i=0; i<8; i++) sigStr += (i<p) ? "█" : "░";
-            uplinkVal.textContent = sigStr + ` ${data.uplink}%`;
-        }
-        
-        const diagUplinkFill = document.querySelector('.diagnostics-panel .diag-item:nth-child(4) .diag-fill');
-        if(diagUplinkFill) diagUplinkFill.style.width = `${data.uplink}%`;
-        
-        document.getElementById('power-val').textContent = `${data.power}%`;
-        document.querySelector('.diagnostics-panel .diag-item:nth-child(5) .diag-fill').style.width = `${data.power}%`;
-        
-        // Update Thermals Panel
-        if(data.cpu_temp !== undefined) {
-            document.getElementById('cpu-temp-val').textContent = `${data.cpu_temp}°C`;
-            const cpuTempFill = document.getElementById('cpu-temp-fill');
-            if(cpuTempFill) {
-                cpuTempFill.style.width = `${Math.min(100, data.cpu_temp)}%`;
-                cpuTempFill.style.background = data.cpu_temp > 85 ? 'var(--error)' : data.cpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
+    const sysCard = document.querySelector('.diagnostics-panel');
+    if (!document.hidden) {
+        try {
+            const response = await api('/api/telemetry', { timeout: 8000 });
+            if (!response.ok) throw new Error('telemetry ' + response.status);
+            const data = await response.json();
+            telemetryStaleCount = 0;
+            setStale(sysCard, false);
+            setStale(document.querySelector('.thermals-panel'), false);
+
+            // Diagnostics bars
+            setDiag('load-fill', 'load-val', `${data.cpu}%`, data.cpu);
+            setDiag('mem-fill', 'mem-val', `${data.memory}%`, data.memory);
+            setDiag('uplink-fill', 'uplink-val', `${data.uplink}%`, data.uplink);
+            setDiag('power-fill', 'power-val', `${data.power}%`, data.power);
+
+            // Topbar signal pill (compact 5-block meter)
+            const uplinkVal = document.getElementById('hud-signal');
+            if(uplinkVal) {
+                let sigStr = "";
+                let p = Math.round((data.uplink / 100) * 5);
+                for(let i=0; i<5; i++) sigStr += (i<p) ? "█" : "░";
+                uplinkVal.textContent = sigStr + ` ${data.uplink}%`;
             }
-        }
-        
-        if(data.cpu_fan !== undefined) {
-            document.getElementById('cpu-fan-val').textContent = `${data.cpu_fan} RPM`;
-            const cpuFanFill = document.getElementById('cpu-fan-fill');
-            if(cpuFanFill) cpuFanFill.style.width = `${Math.min(100, (data.cpu_fan / 5000) * 100)}%`;
-        }
-        
-        if(data.gpu_temp !== undefined) {
-            document.getElementById('gpu-temp-val').textContent = `${data.gpu_temp}°C`;
-            const gpuTempFill = document.getElementById('gpu-temp-fill');
-            if(gpuTempFill) {
-                gpuTempFill.style.width = `${Math.min(100, data.gpu_temp)}%`;
-                gpuTempFill.style.background = data.gpu_temp > 85 ? 'var(--error)' : data.gpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
+
+            // Thermals: backend sends null when a sensor is unavailable
+            if(data.cpu_temp != null) {
+                setDiag('cpu-temp-fill', 'cpu-temp-val', `${data.cpu_temp}°C`, data.cpu_temp);
+                const cpuTempFill = document.getElementById('cpu-temp-fill');
+                if(cpuTempFill) cpuTempFill.style.background = data.cpu_temp > 85 ? 'var(--danger)' : data.cpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
+            } else {
+                const v = document.getElementById('cpu-temp-val');
+                if (v) v.textContent = 'N/A';
             }
-        }
-        
-        if(data.gpu_mem !== undefined) {
-            document.getElementById('gpu-mem-val').textContent = data.gpu_mem;
-            // Rough parsing of "X / Y MB" to get a percentage
-            let memParts = data.gpu_mem.split('/');
-            if(memParts.length === 2) {
-                let used = parseInt(memParts[0]);
-                let total = parseInt(memParts[1]);
-                if(!isNaN(used) && !isNaN(total) && total > 0) {
-                    const gpuMemFill = document.getElementById('gpu-mem-fill');
-                    if(gpuMemFill) gpuMemFill.style.width = `${(used/total)*100}%`;
+
+            if(data.cpu_fan != null) {
+                setDiag('cpu-fan-fill', 'cpu-fan-val', `${data.cpu_fan} RPM`, (data.cpu_fan / 5000) * 100);
+            } else {
+                const v = document.getElementById('cpu-fan-val');
+                if (v) v.textContent = 'N/A';
+            }
+
+            if(data.gpu_temp != null) {
+                setDiag('gpu-temp-fill', 'gpu-temp-val', `${data.gpu_temp}°C`, data.gpu_temp);
+                const gpuTempFill = document.getElementById('gpu-temp-fill');
+                if(gpuTempFill) gpuTempFill.style.background = data.gpu_temp > 85 ? 'var(--danger)' : data.gpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
+            } else {
+                const v = document.getElementById('gpu-temp-val');
+                if (v) v.textContent = 'N/A';
+            }
+
+            if(data.gpu_mem !== undefined) {
+                const v = document.getElementById('gpu-mem-val');
+                if (v) v.textContent = data.gpu_mem;
+                let memParts = String(data.gpu_mem).split('/');
+                if(memParts.length === 2) {
+                    let used = parseInt(memParts[0]);
+                    let total = parseInt(memParts[1]);
+                    if(!isNaN(used) && !isNaN(total) && total > 0) {
+                        setDiag('gpu-mem-fill', 'gpu-mem-val', data.gpu_mem, (used/total)*100);
+                    }
                 }
             }
-        }
-        
-        if(data.gpu_fan !== undefined) {
-            document.getElementById('gpu-fan-val').textContent = data.gpu_fan;
-        }
-        
-        // Update Chart Data
-        chartData.cpu.push(data.cpu); chartData.cpu.shift();
-        chartData.mem.push(data.memory); chartData.mem.shift();
-        
-        // Fake network latency volatility for chart aesthetics
-        let latencyVal = parseInt(data.latency.replace('ms',''));
-        if(isNaN(latencyVal)) latencyVal = 10;
-        let fakeNetLoad = Math.min(100, Math.max(0, latencyVal * 2 + (Math.random()*20 - 10)));
-        chartData.net.push(fakeNetLoad); chartData.net.shift();
-        
-        // Draw Charts
-        document.getElementById('chart-cpu-val').textContent = `${data.cpu}%`;
-        drawChart('chart-cpu', chartData.cpu, '#00f0ff'); // cyan
-        
-        document.getElementById('chart-mem-val').textContent = `${data.memory}%`;
-        drawChart('chart-mem', chartData.mem, '#a855f7'); // purple
-        
-        document.getElementById('chart-net-val').textContent = data.latency;
-        drawChart('chart-net', chartData.net, '#00ff88'); // green
-        
-        // AURA CORE AI Telemetry
-        if(data.ai) {
-            const ai = data.ai;
-            document.getElementById('ai-model-val').textContent = ai.model || '---';
-            document.getElementById('ai-vram-val').textContent = `${ai.vram}GB`;
-            
-            if(ai.telemetry) {
-                document.getElementById('ai-tokens-val').textContent = `${ai.telemetry.tokens_per_sec.toFixed(1)}/s`;
-                document.getElementById('ai-vision-val').textContent = `${ai.telemetry.vision_latency.toFixed(1)}s`;
-                document.getElementById('ai-tools-val').textContent = `${ai.telemetry.tool_latency.toFixed(1)}s`;
+
+            if(data.gpu_fan !== undefined) {
+                const v = document.getElementById('gpu-fan-val');
+                if (v) v.textContent = data.gpu_fan;
             }
+
+            // Chart Data
+            chartData.cpu.push(data.cpu); chartData.cpu.shift();
+            chartData.mem.push(data.memory); chartData.mem.shift();
+            let netLoad = Math.min(100, Math.max(0, data.uplink || 0));
+            chartData.net.push(netLoad); chartData.net.shift();
+
+            updateGauge('cpu', data.cpu);
+            updateGauge('mem', data.memory);
+            updateGauge('net', netLoad);
+
+            // AURA CORE AI Telemetry
+            if(data.ai) {
+                const ai = data.ai;
+                const modelVal = document.getElementById('ai-model-val');
+                if (modelVal) modelVal.textContent = ai.model || '---';
+                const vramVal = document.getElementById('ai-vram-val');
+                if (vramVal) vramVal.textContent = `${ai.vram}GB`;
+
+                if(ai.telemetry) {
+                    const t = ai.telemetry;
+                    const tokensVal = document.getElementById('ai-tokens-val');
+                    if (tokensVal) tokensVal.textContent = `${(t.tokens_per_sec || 0).toFixed(1)}/s`;
+                    const visionVal = document.getElementById('ai-vision-val');
+                    if (visionVal) visionVal.textContent = `${(t.vision_latency || 0).toFixed(1)}s`;
+                    const toolsVal = document.getElementById('ai-tools-val');
+                    if (toolsVal) toolsVal.textContent = `${(t.tool_latency || 0).toFixed(1)}s`;
+                }
+            }
+        } catch (error) {
+            telemetryStaleCount++;
+            if (telemetryStaleCount >= 3) {
+                setStale(sysCard, true);
+                setStale(document.querySelector('.thermals-panel'), true);
+            }
+            console.warn("Telemetry fetch failed", error.message);
         }
-        
-    } catch (error) {
-        console.error("Failed to fetch telemetry", error);
     }
     setTimeout(updateTelemetry, 3000);
 }
 
 // ═══════════════════════════════════════════════════════════
-// THREAT DETECTION
+// THREAT DETECTION (Security view)
 // ═══════════════════════════════════════════════════════════
 async function fetchThreats() {
     try {
-        const res = await fetch('/api/threats');
+        const res = await api('/api/threats', { timeout: 8000 });
         if (res.ok) {
             const data = await res.json();
             const box = document.getElementById('threat-box');
             const val = document.getElementById('threat-val');
             const msg = document.getElementById('threat-msg');
-            
+
             if(data.status === 'ELEVATED') {
-                if(val.textContent !== 'ELEVATED') {
+                if(val && val.textContent !== 'ELEVATED') {
                     showToast('SECURITY ALERT', 'Anomalous login activity detected!', 'error');
-                    if(box) {
-                        box.style.borderColor = 'var(--error)';
-                        box.style.boxShadow = '0 0 20px var(--error)';
-                    }
-                    if(val) {
-                        val.textContent = 'ELEVATED';
-                        val.style.color = 'var(--error)';
-                    }
                 }
+                box?.classList.add('elevated');
+                if(val) val.textContent = 'ELEVATED';
             } else {
-                if(box) {
-                    box.style.borderColor = '';
-                    box.style.boxShadow = '';
-                }
-                if(val) {
-                    val.textContent = 'CLEAR';
-                    val.style.color = 'var(--cyan)';
-                }
+                box?.classList.remove('elevated');
+                if(val) val.textContent = 'CLEAR';
             }
-            if(msg) msg.textContent = data.message;
+            if(msg && data.message) msg.textContent = data.message;
         }
     } catch(e) {}
     setTimeout(fetchThreats, 10000);
 }
 
 // ═══════════════════════════════════════════════════════════
-// QUICK ACTIONS
+// QUICK ACTIONS & MEDIA
 // ═══════════════════════════════════════════════════════════
+async function refreshScreenPreview() {
+    try {
+        const res = await api(`/api/captures/last_screen?t=${Date.now()}`, { method: 'HEAD' });
+        if (!res.ok) return;
+        const img = document.getElementById('screen-preview-img');
+        const container = document.getElementById('screen-preview-container');
+        const span = container?.querySelector('.screen-preview-empty-text');
+        if (img && container) {
+            img.src = `/api/captures/last_screen?t=${Date.now()}`;
+            img.style.display = 'block';
+            if (span) span.style.display = 'none';
+            container.classList.add('has-image');
+        }
+    } catch (e) {}
+}
+
 async function handleFluentCommand(command) {
-    if (reactorContainer.classList.contains('listening')) return;
-    
-    reactorContainer.classList.add('listening');
-    coreStatus.textContent = 'PROCESSING...';
+    if (window.auraState === 'listening') return;
+
     commandInput.disabled = true;
-    
+    setAuraState('processing');
     clearInterval(visInterval);
     visInterval = setInterval(() => animateVisualizer(true), 100);
 
     await appendToTerminal(`[SYSTEM ACTION] ${command}`, 'user');
 
     try {
-        const response = await fetch('/api/chat', {
+        const response = await api('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: command, use_voice_output: true })
+            body: JSON.stringify({ message: command, use_voice_output: true }),
+            timeout: 120000
         });
         const data = await response.json();
-        
-        reactorContainer.classList.remove('listening');
-        coreStatus.textContent = 'ONLINE';
+
+        setAuraState('idle');
         clearInterval(visInterval);
         visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
@@ -1032,23 +1111,16 @@ async function handleFluentCommand(command) {
         if (data.response) {
             playTTS(data.response);
             await appendToTerminal(data.response, 'aura');
-            
+
             // If the command was to read screen, refresh the thumbnail
             if (command.includes('read my screen')) {
-                const img = document.getElementById('screen-preview-img');
-                const span = document.querySelector('#screen-preview-container span');
-                if(img) {
-                    img.src = `/captures/last_screen.png?t=${new Date().getTime()}`;
-                    img.style.display = 'block';
-                    if(span) span.style.display = 'none';
-                }
+                refreshScreenPreview();
             }
         } else {
             await appendToTerminal('No response received.', 'error');
         }
     } catch (error) {
-        reactorContainer.classList.remove('listening');
-        coreStatus.textContent = 'ONLINE';
+        setAuraState('idle');
         clearInterval(visInterval);
         visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
@@ -1056,15 +1128,15 @@ async function handleFluentCommand(command) {
     }
 }
 
-document.getElementById('qa-read-screen').addEventListener('click', () => handleFluentCommand('read my screen'));
-document.getElementById('qa-lock').addEventListener('click', () => handleFluentCommand('lock the system'));
-document.getElementById('qa-web').addEventListener('click', () => handleFluentCommand('search the web for the latest news'));
-document.getElementById('qa-scan').addEventListener('click', () => handleFluentCommand('run a basic threat scan on the system'));
+document.getElementById('qa-read-screen')?.addEventListener('click', () => handleFluentCommand('read my screen'));
+document.getElementById('qa-lock')?.addEventListener('click', () => handleFluentCommand('lock the system'));
+document.getElementById('qa-web')?.addEventListener('click', () => handleFluentCommand('search the web for the latest news'));
+document.getElementById('qa-scan')?.addEventListener('click', () => handleFluentCommand('run a basic threat scan on the system'));
 
-// Media Control Fake Bindings (Since API might not be fully configured)
-document.getElementById('sp-play').addEventListener('click', () => handleFluentCommand('toggle media playback'));
-document.getElementById('sp-next').addEventListener('click', () => handleFluentCommand('play next track'));
-document.getElementById('sp-prev').addEventListener('click', () => handleFluentCommand('play previous track'));
+// Media Control bindings
+document.getElementById('sp-play')?.addEventListener('click', () => handleFluentCommand('toggle media playback'));
+document.getElementById('sp-next')?.addEventListener('click', () => handleFluentCommand('play next track'));
+document.getElementById('sp-prev')?.addEventListener('click', () => handleFluentCommand('play previous track'));
 
 // Ripple Effect
 document.querySelectorAll('.qa-btn, .sp-btn').forEach(btn => {
@@ -1082,121 +1154,50 @@ document.querySelectorAll('.qa-btn, .sp-btn').forEach(btn => {
 });
 
 // Lightbox logic
+const lightboxOverlay = document.getElementById('lightbox-overlay');
 document.getElementById('screen-preview-container')?.addEventListener('click', () => {
     const img = document.getElementById('screen-preview-img');
-    const lightbox = document.getElementById('lightbox-overlay');
     const lightboxImg = document.getElementById('lightbox-img');
-    if (img && img.style.display !== 'none' && lightbox && lightboxImg) {
+    if (img && img.style.display !== 'none' && lightboxOverlay && lightboxImg && img.src) {
         lightboxImg.src = img.src;
-        lightbox.style.display = 'flex';
+        lightboxOverlay.classList.add('open');
     }
 });
-document.getElementById('lightbox-overlay')?.addEventListener('click', function() {
-    this.style.display = 'none';
-});
+lightboxOverlay?.addEventListener('click', () => lightboxOverlay.classList.remove('open'));
 
 // ═══════════════════════════════════════════════════════════
-// DRAG AND DROP PANELS
+// SCHEDULE & REMINDERS (Chat rail)
 // ═══════════════════════════════════════════════════════════
-const panels = document.querySelectorAll('.panel[draggable="true"]');
-const columns = document.querySelectorAll('.left-col, .right-col');
-let draggedPanel = null;
+let lastScheduleHash = null;
 
-panels.forEach(panel => {
-    panel.addEventListener('dragstart', function(e) {
-        draggedPanel = this;
-        setTimeout(() => this.classList.add('dragging'), 0);
-        e.dataTransfer.effectAllowed = 'move';
-    });
-    
-    panel.addEventListener('dragend', function() {
-        draggedPanel = null;
-        this.classList.remove('dragging');
-    });
-});
-
-columns.forEach(col => {
-    col.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        if(!draggedPanel) return;
-        
-        // Find the panel we are hovering over
-        const afterElement = getDragAfterElement(col, e.clientY);
-        if (afterElement == null) {
-            col.appendChild(draggedPanel);
-        } else {
-            col.insertBefore(draggedPanel, afterElement);
-        }
-    });
-});
-
-function getDragAfterElement(container, y) {
-    const draggableElements = [...container.querySelectorAll('.panel:not(.dragging)')];
-    
-    return draggableElements.reduce((closest, child) => {
-        const box = child.getBoundingClientRect();
-        const offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) {
-            return { offset: offset, element: child };
-        } else {
-            return closest;
-        }
-    }, { offset: Number.NEGATIVE_INFINITY }).element;
-}
-
-// ═══════════════════════════════════════════════════════════
-// THEME SWITCHER
-// ═══════════════════════════════════════════════════════════
-const themeDots = document.querySelectorAll('.theme-dot');
-const savedTheme = localStorage.getItem('aura-theme');
-if (savedTheme) {
-    document.documentElement.className = savedTheme;
-}
-
-themeDots.forEach(dot => {
-    // highlight selected dot
-    if(dot.dataset.theme === (savedTheme || "")) {
-        dot.style.borderColor = getComputedStyle(dot).backgroundColor;
-    }
-
-    dot.addEventListener('click', function() {
-        const theme = this.dataset.theme;
-        document.documentElement.className = theme;
-        localStorage.setItem('aura-theme', theme);
-        
-        themeDots.forEach(d => {
-            if(d === this) {
-                d.style.borderColor = getComputedStyle(d).backgroundColor;
-            } else {
-                d.style.borderColor = 'transparent';
-            }
-        });
-    });
-});
-
-// ═══════════════════════════════════════════════════════════
-// SCHEDULE & REMINDERS
-// ═══════════════════════════════════════════════════════════
 async function fetchSchedule() {
     try {
-        const res = await fetch('/api/schedule');
-        if(!res.ok) return;
-        const data = await res.json();
-        
-        const list = document.getElementById('schedule-list');
-        if(!list) return;
-        list.innerHTML = '';
-        
-        if (data.length === 0) {
-            list.innerHTML = '<div style="font-size: 10px; color: var(--text-dim);">No scheduled events.</div>';
-        } else {
-            data.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'schedule-item';
-                div.innerHTML = `<span>${item.time}</span><span>${item.event}</span>`;
-                list.appendChild(div);
-            });
+        const res = await api('/api/schedule', { timeout: 8000 });
+        if(res.ok) {
+            const data = await res.json();
+            const hash = JSON.stringify(data);
+            if (hash !== lastScheduleHash) {
+                lastScheduleHash = hash;
+                const list = document.getElementById('schedule-list');
+                if(list) {
+                    list.innerHTML = '';
+                    if (!data || data.length === 0) {
+                        list.innerHTML = '<div class="schedule-empty">No scheduled events.</div>';
+                    } else {
+                        data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.className = 'schedule-item';
+                            const timeSpan = document.createElement('span');
+                            timeSpan.textContent = item.time;
+                            const eventSpan = document.createElement('span');
+                            eventSpan.textContent = item.event;
+                            div.appendChild(timeSpan);
+                            div.appendChild(eventSpan);
+                            list.appendChild(div);
+                        });
+                    }
+                }
+            }
         }
     } catch(e) {}
     setTimeout(fetchSchedule, 30000);
@@ -1206,9 +1207,9 @@ document.getElementById('btn-add-sched')?.addEventListener('click', async () => 
     const time = document.getElementById('sched-time').value.trim();
     const event = document.getElementById('sched-event').value.trim();
     if(!time || !event) return;
-    
+
     try {
-        const res = await fetch('/api/schedule', {
+        const res = await api('/api/schedule', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({time, event})
@@ -1217,231 +1218,356 @@ document.getElementById('btn-add-sched')?.addEventListener('click', async () => 
         if(data.status === 'success') {
             document.getElementById('sched-time').value = '';
             document.getElementById('sched-event').value = '';
-            showToast('SCHEDULE UPDATED', `Added: ${event}`, 'info');
+            lastScheduleHash = null; // force re-render
+            showToast('SCHEDULE UPDATED', `Added: ${event}`, 'success');
             fetchSchedule();
         }
-    } catch(e) {}
+    } catch(e) {
+        showToast('SCHEDULE ERROR', 'Could not reach the backend.', 'error');
+    }
 });
 
 // ═══════════════════════════════════════════════════════════
-// MEMORY VIEWER
-// ═══════════════════════════════════════════════════════════
-let memoryCache = {};
-
-async function fetchMemory() {
-    try {
-        const res = await fetch('/api/memory');
-        if(!res.ok) return;
-        memoryCache = await res.json();
-        renderMemory();
-    } catch(e) {}
-}
-
-function renderMemory() {
-    const list = document.getElementById('memory-list');
-    const search = document.getElementById('memory-search');
-    if(!list || !search) return;
-    
-    const query = search.value.toLowerCase();
-    list.innerHTML = '';
-    
-    const keys = Object.keys(memoryCache).filter(k => 
-        k.toLowerCase().includes(query) || 
-        String(memoryCache[k]).toLowerCase().includes(query)
-    );
-    
-    if (keys.length === 0) {
-        list.innerHTML = '<div style="font-size: 10px; color: var(--text-dim);">Archive is empty or no match.</div>';
-    } else {
-        keys.forEach(k => {
-            const div = document.createElement('div');
-            div.className = 'memory-item';
-            div.innerHTML = `
-                <div class="memory-key">${k}</div>
-                <div class="memory-val">${memoryCache[k]}</div>
-                <div class="memory-del" data-key="${k}">×</div>
-            `;
-            list.appendChild(div);
-        });
-        
-        // Bind delete buttons
-        document.querySelectorAll('.memory-del').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const key = e.target.dataset.key;
-                try {
-                    const res = await fetch(`/api/memory/${encodeURIComponent(key)}`, {method: 'DELETE'});
-                    if(res.ok) {
-                        delete memoryCache[key];
-                        renderMemory();
-                        showToast('MEMORY PURGED', `Key: ${key}`, 'warning');
-                    }
-                } catch(err) {}
-            });
-        });
-    }
-}
-
-document.getElementById('memory-search')?.addEventListener('input', renderMemory);
-
-// ═══════════════════════════════════════════════════════════
-// NETWORK GRID LOGIC
+// NETWORK GRID LOGIC (force-directed graph, Security view)
 // ═══════════════════════════════════════════════════════════
 let networkNodes = [];
+let netSimulation = null;
+let netTooltip = null;
+
+function sendPrompt(text) {
+    if (!text || !commandInput || commandInput.disabled) return;
+    showView('chat');
+    commandInput.value = text;
+    commandInput.dispatchEvent(new Event('input'));
+    commandInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    commandInput.focus();
+}
+
 async function fetchNetworkScan() {
     try {
         const btn = document.getElementById('btn-net-scan');
-        if(btn) btn.textContent = 'SCANNING...';
-        const res = await fetch('/api/network/scan');
-        if(!res.ok) throw new Error();
+        if(btn) btn.textContent = 'SCANNING…';
+        const res = await api('/api/network/scan', { timeout: 45000 });
+        if(!res.ok) throw new Error('scan failed');
         const data = await res.json();
-        
+
         networkNodes = data.nodes || [];
-        renderNetworkCanvas();
+        renderNetworkGraph();
         if(btn) btn.textContent = 'SCAN';
     } catch(e) {
         const btn = document.getElementById('btn-net-scan');
         if(btn) btn.textContent = 'SCAN';
+        showToast('NETWORK SCAN FAILED', 'Could not complete the scan.', 'error');
     }
 }
 
-function renderNetworkCanvas() {
-    const canvas = document.getElementById('network-canvas');
-    if(!canvas) return;
-    const ctx = canvas.getContext('2d');
-    
-    // Fit canvas to element size
-    canvas.width = canvas.parentElement.offsetWidth;
-    canvas.height = canvas.parentElement.offsetHeight;
-    
-    const w = canvas.width;
-    const h = canvas.height;
-    const cx = w / 2;
-    const cy = h / 2;
-    
-    ctx.clearRect(0, 0, w, h);
-    
-    // Draw radar rings
-    ctx.strokeStyle = 'rgba(0, 240, 255, 0.2)';
-    ctx.lineWidth = 1;
-    for(let r=20; r<100; r+=25) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI*2);
-        ctx.stroke();
+function netNodeColor(d) {
+    if (d.kind === 'local') return 'var(--cyan)';
+    if (d.kind === 'suspicious') return 'var(--red)';
+    return 'var(--amber)';
+}
+
+function renderNetworkGraph() {
+    const svg = document.getElementById('network-svg');
+    if (!svg) return;
+    if (typeof d3 === 'undefined') return; // vendor lib unavailable
+
+    const container = svg.parentElement;
+    const width = container.offsetWidth;
+    const height = container.offsetHeight;
+    if (width < 10 || height < 10) return;
+
+    if (netSimulation) { netSimulation.stop(); netSimulation = null; }
+
+    if (!netTooltip || !container.contains(netTooltip)) {
+        netTooltip = document.createElement('div');
+        netTooltip.className = 'network-tooltip';
+        container.appendChild(netTooltip);
     }
-    
-    // Draw central node (PC)
-    ctx.fillStyle = 'var(--cyan)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 5, 0, Math.PI*2);
-    ctx.fill();
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = 'var(--cyan)';
-    
-    // Draw discovered nodes
-    const computedStyle = getComputedStyle(document.documentElement);
-    const purple = computedStyle.getPropertyValue('--purple').trim() || '#a855f7';
-    
-    ctx.shadowBlur = 5;
-    ctx.shadowColor = purple;
-    
-    networkNodes.forEach((node, i) => {
-        // Distribute in a circle
-        const angle = (i / networkNodes.length) * Math.PI * 2;
-        const dist = 30 + Math.random() * 50;
-        const nx = cx + Math.cos(angle) * dist;
-        const ny = cy + Math.sin(angle) * dist;
-        
-        // Draw line
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(nx, ny);
-        ctx.strokeStyle = 'rgba(168, 85, 247, 0.4)'; // dim purple
-        ctx.stroke();
-        
-        // Draw node
-        ctx.beginPath();
-        ctx.arc(nx, ny, 3, 0, Math.PI*2);
-        ctx.fillStyle = purple;
-        ctx.fill();
-        
-        // Draw IP text
-        ctx.font = '8px monospace';
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.shadowBlur = 0;
-        ctx.fillText(node.ip, nx + 5, ny + 3);
+
+    const nodes = [{ id: 'local', label: 'LOCAL', kind: 'local', port: null, process: 'aura-host' }];
+    const links = [];
+    networkNodes.forEach((n, i) => {
+        const id = n.ip || ('node-' + i);
+        const suspicious = n.type === 'suspicious' || n.suspicious === true;
+        nodes.push({
+            id: id,
+            label: n.ip || id,
+            kind: suspicious ? 'suspicious' : 'external',
+            mac: n.mac,
+            port: n.port,
+            process: n.process
+        });
+        links.push({ source: 'local', target: id });
     });
+
+    d3.select(svg).selectAll('*').remove();
+    const root = d3.select(svg).attr('width', width).attr('height', height);
+
+    const linkSel = root.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('stroke-width', 0.5)
+        .style('stroke', 'rgba(148,163,184,0.25)');
+
+    const nodeSel = root.append('g')
+        .selectAll('circle')
+        .data(nodes)
+        .join('circle')
+        .attr('class', 'net-node')
+        .attr('r', 5)
+        .style('fill', netNodeColor)
+        .call(d3.drag()
+            .on('start', (event, d) => {
+                if (!event.active) netSimulation.alphaTarget(0.3).restart();
+                d.fx = d.x; d.fy = d.y;
+            })
+            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end', (event, d) => {
+                if (!event.active) netSimulation.alphaTarget(0);
+                d.fx = null; d.fy = null;
+            })
+        );
+
+    const labelSel = root.append('g')
+        .selectAll('text')
+        .data(nodes)
+        .join('text')
+        .attr('class', 'net-label')
+        .attr('dy', 12)
+        .text(d => d.label);
+
+    nodeSel
+        .on('mouseover', (event, d) => {
+            const port = d.port !== undefined && d.port !== null ? d.port : '—';
+            const proc = d.process || '—';
+            netTooltip.innerHTML = `PORT: ${escapeHtml(String(port))} | PROC: ${escapeHtml(String(proc))}` +
+                (d.mac ? `<br>MAC: ${escapeHtml(d.mac)}` : '') +
+                (d.id !== 'local' ? `<br>IP: ${escapeHtml(d.id)}` : '');
+            netTooltip.style.display = 'block';
+        })
+        .on('mousemove', (event) => {
+            const rect = container.getBoundingClientRect();
+            const x = event.clientX - rect.left + 10;
+            const y = event.clientY - rect.top - 10;
+            netTooltip.style.left = Math.min(x, rect.width - netTooltip.offsetWidth - 4) + 'px';
+            netTooltip.style.top = Math.max(2, y) + 'px';
+        })
+        .on('mouseout', () => { netTooltip.style.display = 'none'; })
+        .on('click', (event, d) => {
+            netTooltip.style.display = 'none';
+            const details = [];
+            if (d.port) details.push('port ' + d.port);
+            if (d.process) details.push('process ' + d.process);
+            if (d.mac) details.push('mac ' + d.mac);
+            if (d.id !== 'local') details.push('ip ' + d.id);
+            const prefix = d.port ? `Analyze port ${d.port}` : `Analyze host ${d.id}`;
+            sendPrompt(`${prefix}: ${details.join(', ')}`);
+        });
+
+    netSimulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(55))
+        .force('charge', d3.forceManyBody().strength(-50))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .on('tick', () => {
+            linkSel
+                .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+            nodeSel
+                .attr('cx', d => d.x).attr('cy', d => d.y);
+            labelSel
+                .attr('x', d => d.x).attr('y', d => d.y);
+        });
 }
 
 document.getElementById('btn-net-scan')?.addEventListener('click', fetchNetworkScan);
-window.addEventListener('resize', () => { if(networkNodes.length) renderNetworkCanvas(); });
+let netResizeTimer = null;
+window.addEventListener('resize', () => {
+    if (!networkNodes.length || !isViewActive('security')) return;
+    clearTimeout(netResizeTimer);
+    netResizeTimer = setTimeout(renderNetworkGraph, 200);
+});
 
 // ═══════════════════════════════════════════════════════════
-// PROCESS MANAGER
+// PROCESS MANAGER (System view) — diff-render + confirm kill
 // ═══════════════════════════════════════════════════════════
+let lastProcessHash = null;
+let processFailures = 0;
+
 async function fetchProcesses() {
-    try {
-        const res = await fetch('/api/processes');
-        if(!res.ok) return;
-        const data = await res.json();
-        
-        const list = document.getElementById('process-list');
-        if(!list) return;
-        list.innerHTML = '';
-        
-        if (data.processes && data.processes.length > 0) {
-            data.processes.forEach(p => {
-                const div = document.createElement('div');
-                div.className = 'process-item';
-                div.innerHTML = `
-                    <div class="process-info">
-                        <span class="process-name">${p.name} (PID: ${p.pid})</span>
-                        <span class="process-stats">CPU: ${p.cpu.toFixed(1)}% | MEM: ${p.mem.toFixed(1)}%</span>
-                    </div>
-                    <button class="btn-kill" data-pid="${p.pid}">KILL</button>
-                `;
-                list.appendChild(div);
-            });
-            
-            // Bind kill buttons
-            document.querySelectorAll('.btn-kill').forEach(btn => {
-                btn.addEventListener('click', async (e) => {
-                    const pid = e.target.dataset.pid;
-                    try {
-                        const kRes = await fetch('/api/processes/kill', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({pid: parseInt(pid)})
-                        });
-                        const kData = await kRes.json();
-                        if(kData.status === 'success') {
-                            showToast('PROCESS TERMINATED', `PID: ${pid}`, 'warning');
-                            fetchProcesses(); // refresh list immediately
-                        } else {
-                            showToast('TERMINATION FAILED', kData.message, 'error');
-                        }
-                    } catch(err) {}
-                });
-            });
+    const pollActive = isViewActive('system');
+    if (!document.hidden && pollActive) {
+        try {
+            const res = await api('/api/processes', { timeout: 8000 });
+            if(res.ok) {
+                const data = await res.json();
+                processFailures = 0;
+                setStale(document.querySelector('.process-panel'), false);
+                const hash = JSON.stringify(data.processes || []);
+                if (hash !== lastProcessHash) {
+                    lastProcessHash = hash;
+                    renderProcesses(data.processes || []);
+                }
+            }
+        } catch(e) {
+            processFailures++;
+            if (processFailures >= 3) setStale(document.querySelector('.process-panel'), true);
         }
-    } catch(e) {}
-    setTimeout(fetchProcesses, 5000);
+    }
+    setTimeout(fetchProcesses, pollActive ? 5000 : 30000);
 }
 
-// Init
-setTimeout(loadHistory, 1500);
-updateTelemetry();
-fetchSchedule();
-fetchMemory();
-fetchNetworkScan();
-fetchProcesses();
+function renderProcesses(processes) {
+    const list = document.getElementById('process-list');
+    if(!list) return;
+    list.innerHTML = '';
+
+    if (processes.length === 0) {
+        list.innerHTML = '<div class="empty-note">No processes reported.</div>';
+        return;
+    }
+
+    processes.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'process-item';
+        div.innerHTML = `
+            <div class="process-info">
+                <span class="process-name">${escapeHtml(p.name)} <span class="mono">· PID ${escapeHtml(String(p.pid))}</span></span>
+                <span class="process-stats">CPU ${Number(p.cpu).toFixed(1)}% · MEM ${Number(p.mem).toFixed(1)}%</span>
+            </div>
+            <button class="btn-kill" data-pid="${escapeHtml(String(p.pid))}" data-name="${escapeHtml(p.name)}">KILL</button>
+        `;
+        list.appendChild(div);
+    });
+
+    list.querySelectorAll('.btn-kill').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const pid = e.currentTarget.dataset.pid;
+            const name = e.currentTarget.dataset.name;
+            const confirmed = await confirmAction({
+                title: 'Terminate process',
+                message: `Kill "${name}" (PID ${pid})? This cannot be undone.`,
+                okLabel: 'KILL'
+            });
+            if (!confirmed) return;
+            try {
+                const kRes = await api('/api/processes/kill', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({pid: parseInt(pid)})
+                });
+                const kData = await kRes.json();
+                if(kData.status === 'success') {
+                    showToast('PROCESS TERMINATED', `PID: ${pid}`, 'warning');
+                    lastProcessHash = null;
+                    fetchProcesses();
+                } else {
+                    showToast('TERMINATION FAILED', kData.message || 'Unknown error', 'error');
+                }
+            } catch(err) {
+                showToast('TERMINATION FAILED', 'Could not reach the backend.', 'error');
+            }
+        });
+    });
+}
 
 // ═══════════════════════════════════════════════════════════
-// WAKE WORD & NOTIFICATIONS 
+// SECURITY CLEARANCE (pending tool permissions)
+// ═══════════════════════════════════════════════════════════
+const permissionsList = document.getElementById('permissions-list');
+const trustedModeToggle = document.getElementById('trusted-mode-toggle');
+
+async function fetchPermissions() {
+    if (!permissionsList) return;
+    if (document.hidden) return;
+    try {
+        const res = await api('/api/permissions/pending', { timeout: 8000 });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (trustedModeToggle && !trustedModeToggle.matches(':focus')) {
+            trustedModeToggle.checked = !!data.trusted_automation;
+        }
+
+        const pending = data.pending || {};
+        if (Object.keys(pending).length === 0) {
+            if (!permissionsList.dataset.empty) {
+                permissionsList.innerHTML = '<div class="empty-note">NO PENDING ACTIONS</div>';
+                permissionsList.dataset.empty = "1";
+            }
+            return;
+        }
+        delete permissionsList.dataset.empty;
+        permissionsList.innerHTML = '';
+
+        Object.values(pending).forEach(action => {
+            const item = document.createElement('div');
+            item.className = 'perm-item';
+
+            const label = document.createElement('div');
+            label.className = 'perm-label';
+            label.textContent = `[${action.risk}] ${action.tool_name}(${JSON.stringify(action.arguments).substring(0, 80)})`;
+
+            const btnRow = document.createElement('div');
+            btnRow.className = 'perm-actions';
+
+            const approveBtn = document.createElement('button');
+            approveBtn.className = 'qa-btn compact';
+            approveBtn.style.color = 'var(--green)';
+            approveBtn.textContent = 'AUTHORIZE';
+            approveBtn.addEventListener('click', async () => {
+                try {
+                    await api(`/api/permissions/confirm/${action.id}`, { method: 'POST' });
+                    showToast('ACTION AUTHORIZED', action.tool_name, 'success');
+                    fetchPermissions();
+                } catch(e) { showToast('ERROR', 'Authorization failed', 'error'); }
+            });
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.className = 'qa-btn compact';
+            rejectBtn.style.color = 'var(--danger)';
+            rejectBtn.textContent = 'REJECT';
+            rejectBtn.addEventListener('click', async () => {
+                try {
+                    await api(`/api/permissions/reject/${action.id}`, { method: 'POST' });
+                    showToast('ACTION REJECTED', action.tool_name, 'info');
+                    fetchPermissions();
+                } catch(e) { showToast('ERROR', 'Rejection failed', 'error'); }
+            });
+
+            btnRow.appendChild(approveBtn);
+            btnRow.appendChild(rejectBtn);
+            item.appendChild(label);
+            item.appendChild(btnRow);
+            permissionsList.appendChild(item);
+        });
+    } catch (e) {}
+}
+
+if (trustedModeToggle) {
+    trustedModeToggle.addEventListener('change', async () => {
+        try {
+            await api('/api/permissions/trusted_mode', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: trustedModeToggle.checked})
+            });
+            showToast('TRUSTED MODE', trustedModeToggle.checked ? 'MEDIUM-risk tools will auto-execute.' : 'All MEDIUM-risk tools require approval.', trustedModeToggle.checked ? 'warning' : 'info');
+        } catch(e) {
+            showToast('ERROR', 'Could not update trusted mode.', 'error');
+        }
+    });
+}
+setInterval(fetchPermissions, 3000);
+fetchPermissions();
+
+// ═══════════════════════════════════════════════════════════
+// NOTIFICATION DRAWER & POLLING
 // ═══════════════════════════════════════════════════════════
 const notifDrawer = document.getElementById('notif-drawer');
 const notifBell = document.getElementById('notif-bell');
 const notifBadge = document.getElementById('notif-badge');
-const notifList = document.getElementById('notif-list');
 let unreadNotifs = 0;
 
 notifBell?.addEventListener('click', () => {
@@ -1457,32 +1583,36 @@ document.getElementById('close-drawer')?.addEventListener('click', () => {
     notifDrawer?.classList.remove('open');
 });
 
-// ═══════════════════════════════════════════════════════════
-// NOTIFICATION POLLING
-// ═══════════════════════════════════════════════════════════
 async function pollNotifications() {
+    if (document.hidden) return;
     try {
-        const response = await fetch('/api/notifications');
+        const response = await api('/api/notifications', { timeout: 8000 });
         if (!response.ok) return;
         const data = await response.json();
-        
+
         if (data.has_notification && data.message) {
             if (data.message === '__WAKE_WORD__') {
-                if (voiceBtn) voiceBtn.click();
+                if (wakeWordActive && canStartListening() && voiceBtn) voiceBtn.click();
                 return;
             }
             playTTS(data.message);
             await appendToTerminal(data.message, 'aura');
             showToast('AURA NOTIFICATION', data.message.substring(0, 50) + '...', 'info');
-            
-            const notifList = document.getElementById('notif-list');
-            if(notifList) {
+
+            const list = document.getElementById('notif-list');
+            if(list) {
                 const item = document.createElement('div');
                 item.className = 'notif-item';
                 const timeStr = new Date().toLocaleTimeString();
-                item.innerHTML = `<div class="notif-time">${timeStr}</div><div>${data.message}</div>`;
-                notifList.prepend(item);
-                
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'notif-time';
+                timeDiv.textContent = timeStr;
+                const msgDiv = document.createElement('div');
+                msgDiv.textContent = data.message;
+                item.appendChild(timeDiv);
+                item.appendChild(msgDiv);
+                list.prepend(item);
+
                 if(!notifDrawer.classList.contains('open')) {
                     unreadNotifs++;
                     if(notifBadge) {
@@ -1495,9 +1625,15 @@ async function pollNotifications() {
     } catch (e) {}
 }
 setInterval(pollNotifications, 5000);
+pollNotifications();
 
+// ═══════════════════════════════════════════════════════════
+// WAKE WORD ("Hey Aura")
+// ═══════════════════════════════════════════════════════════
 let wakeWordActive = false;
 let wakeRecognition = null;
+const wakeWordToggle = document.getElementById('wake-word-toggle');
+const wakeWordStatus = document.getElementById('wake-word-status');
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if (SpeechRecognition) {
@@ -1512,7 +1648,7 @@ if (SpeechRecognition) {
             const rawTranscript = event.results[i][0].transcript.toLowerCase();
             if (rawTranscript.includes('hey aura') && event.results[i].isFinal) {
                 wakeRecognition.stop();
-                voiceBtn.click();
+                if (canStartListening()) voiceBtn.click();
                 break;
             }
         }
@@ -1525,53 +1661,89 @@ if (SpeechRecognition) {
     };
 }
 
-wakeWordToggle.addEventListener('click', () => {
+function toggleWakeWord() {
     wakeWordActive = !wakeWordActive;
+    // Keep the backend openwakeword listener in sync with the HUD toggle
+    api('/api/wakeword/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: wakeWordActive})
+    }).catch(() => {});
+    wakeWordToggle?.setAttribute('aria-checked', String(wakeWordActive));
     if (wakeWordActive) {
         wakeWordStatus.textContent = 'ACTIVE';
-        wakeWordStatus.className = 'status-active';
+        wakeWordStatus.className = 'status-active module-status';
         try { wakeRecognition.start(); } catch(e) {}
         showToast('MODULE ACTIVE', 'Wake word "Hey Aura" enabled.', 'info');
     } else {
         wakeWordStatus.textContent = 'OFF';
-        wakeWordStatus.className = 'status-idle';
+        wakeWordStatus.className = 'status-idle module-status';
         try { wakeRecognition.stop(); } catch(e) {}
         showToast('MODULE OFFLINE', 'Wake word disabled.', 'warning');
     }
+}
+wakeWordToggle?.addEventListener('click', toggleWakeWord);
+wakeWordToggle?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleWakeWord();
+    }
 });
-fetchThreats();
 
-// -----------------------------------------------------------
-// FILE EXPLORER
-// -----------------------------------------------------------
+// Sync the HUD toggle with the backend listener state on page load
+(async () => {
+    try {
+        const res = await api('/api/wakeword/status', { timeout: 8000 });
+        if (!res.ok) return;
+        const data = await res.json();
+        wakeWordActive = !!data.enabled;
+        wakeWordToggle?.setAttribute('aria-checked', String(wakeWordActive));
+        if (wakeWordActive) {
+            wakeWordStatus.textContent = 'ACTIVE';
+            wakeWordStatus.className = 'status-active module-status';
+            try { wakeRecognition.start(); } catch(e) {}
+        } else {
+            wakeWordStatus.textContent = 'OFF';
+            wakeWordStatus.className = 'status-idle module-status';
+        }
+    } catch (e) {}
+})();
+
+// ═══════════════════════════════════════════════════════════
+// FILE EXPLORER (Files view)
+// ═══════════════════════════════════════════════════════════
 let currentFsPath = "";
 async function fetchFileSystem(path = "") {
     try {
-        const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}`);
+        const res = await api(`/api/fs?path=${encodeURIComponent(path)}`, { timeout: 10000 });
         if(res.ok) {
             const data = await res.json();
             if(data.status === 'success') {
                 currentFsPath = data.current;
-                document.getElementById('fs-path').textContent = currentFsPath || 'ROOT';
-                
+                const pathEl = document.getElementById('fs-path');
+                if (pathEl) pathEl.textContent = currentFsPath || 'ROOT';
+
                 const list = document.getElementById('fs-list');
                 if(!list) return;
                 list.innerHTML = "";
-                
+
+                if (!data.items || data.items.length === 0) {
+                    list.innerHTML = '<div class="fs-empty">Empty directory.</div>';
+                    return;
+                }
+
                 data.items.forEach(item => {
                     const div = document.createElement('div');
-                    div.style.display = 'flex';
-                    div.style.alignItems = 'center';
-                    div.style.gap = '8px';
-                    div.style.padding = '4px 8px';
-                    div.style.background = 'rgba(0,240,255,0.05)';
-                    div.style.border = '1px solid var(--border)';
-                    div.style.cursor = 'pointer';
-                    div.style.fontSize = '11px';
-                    
-                    const icon = item.is_dir ? '📁' : '📄';
-                    div.innerHTML = `<span>${icon}</span><span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.name}</span>`;
-                    
+                    div.className = 'fs-item';
+                    const icon = document.createElement('span');
+                    icon.className = 'fs-icon';
+                    icon.textContent = item.is_dir ? '📁' : '📄';
+                    const name = document.createElement('span');
+                    name.className = 'fs-name';
+                    name.textContent = item.name;
+                    div.appendChild(icon);
+                    div.appendChild(name);
+
                     div.addEventListener('click', () => {
                         if(item.is_dir) {
                             fetchFileSystem(item.path);
@@ -1579,14 +1751,11 @@ async function fetchFileSystem(path = "") {
                             showToast('FILE SELECTED', item.name, 'info');
                         }
                     });
-                    
-                    div.addEventListener('mouseenter', () => div.style.background = 'var(--cyan-dim)');
-                    div.addEventListener('mouseleave', () => div.style.background = 'rgba(0,240,255,0.05)');
-                    
+
                     list.appendChild(div);
                 });
             } else {
-                showToast('FS ERROR', data.message, 'error');
+                showToast('FS ERROR', data.message || 'Browse failed', 'error');
             }
         }
     } catch(e) {}
@@ -1605,213 +1774,167 @@ document.getElementById('fs-up-btn')?.addEventListener('click', () => {
 
 fetchFileSystem("");
 
-// -----------------------------------------------------------
-// 3D HOLOGRAPHIC REACTOR
-// -----------------------------------------------------------
-function init3DReactor() {
-    if(typeof THREE === 'undefined') return;
-    const container = document.getElementById('reactor-3d');
-    if(!container) return;
+// ═══════════════════════════════════════════════════════════
+// WEBCAM & FACIAL TRACKING — lazily initialized when the
+// Security view is first opened; degrades to plain video.
+// ═══════════════════════════════════════════════════════════
+const FACE_API_SCRIPT = 'vendor/face-api.min.js';
+const FACE_WEIGHTS_URI = 'vendor/face-api-model';
+let webcamInitialized = false;
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    container.appendChild(renderer.domElement);
-
-    const geometry = new THREE.TorusKnotGeometry(1.5, 0.4, 64, 16);
-    const material = new THREE.MeshBasicMaterial({ 
-        color: 0x00f0ff, 
-        wireframe: true,
-        transparent: true,
-        opacity: 0.3
-    });
-    const torusKnot = new THREE.Mesh(geometry, material);
-    scene.add(torusKnot);
-    
-    const sphereGeo = new THREE.SphereGeometry(1.2, 16, 16);
-    const sphereMat = new THREE.MeshBasicMaterial({
-        color: 0x00f0ff,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.1
-    });
-    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-    scene.add(sphere);
-
-    camera.position.z = 4.5;
-    let baseSpeed = 0.005;
-
-    function animate() {
-        requestAnimationFrame(animate);
-        let cpuLoad = chartData.cpu[chartData.cpu.length - 1] || 0;
-        let speed = baseSpeed + (cpuLoad / 100) * 0.02;
-        
-        torusKnot.rotation.x += speed;
-        torusKnot.rotation.y += speed;
-        sphere.rotation.x -= speed * 0.5;
-        sphere.rotation.y -= speed * 0.5;
-        
-        let time = Date.now() * 0.002;
-        material.opacity = 0.2 + Math.sin(time) * 0.1;
-        
-        if(reactorContainer.classList.contains('listening')) {
-            material.color.setHex(0xff3355);
-            sphereMat.color.setHex(0xff3355);
-        } else {
-            const computedStyle = getComputedStyle(document.documentElement);
-            const themeColor = computedStyle.getPropertyValue('--cyan').trim() || '#00f0ff';
-            material.color.setStyle(themeColor);
-            sphereMat.color.setStyle(themeColor);
-        }
-
-        renderer.render(scene, camera);
-    }
-    animate();
-    
-    window.addEventListener('resize', () => {
-        camera.aspect = container.clientWidth / container.clientHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(container.clientWidth, container.clientHeight);
-    });
-}
-setTimeout(init3DReactor, 500);
-
-// -----------------------------------------------------------
-// WEBCAM & FACIAL TRACKING (face-api.js)
-// -----------------------------------------------------------
-const video = document.getElementById('webcam-video');
-const webcamCanvas = document.getElementById('webcam-canvas');
-
-if (video && webcamCanvas) {
-    Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri('https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights'),
-    ]).then(startVideo);
-
-    function startVideo() {
-        navigator.mediaDevices.getUserMedia({ video: true })
-            .then(stream => {
-                video.srcObject = stream;
-            })
-            .catch(err => console.error('Error accessing webcam:', err));
-    }
-
-    video.addEventListener('play', () => {
-        const displaySize = { width: video.clientWidth, height: video.clientHeight };
-        faceapi.matchDimensions(webcamCanvas, displaySize);
-        setInterval(async () => {
-            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
-            const resizedDetections = faceapi.resizeResults(detections, displaySize);
-            const ctx = webcamCanvas.getContext('2d');
-            ctx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
-            
-            // Draw custom tactical tracking boxes
-            resizedDetections.forEach(detection => {
-                const box = detection.box;
-                ctx.strokeStyle = '#00f0ff';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(box.x, box.y, box.width, box.height);
-                
-                // Draw crosshair lines
-                ctx.beginPath();
-                ctx.moveTo(box.x + box.width / 2, box.y);
-                ctx.lineTo(box.x + box.width / 2, box.y + box.height);
-                ctx.moveTo(box.x, box.y + box.height / 2);
-                ctx.lineTo(box.x + box.width, box.y + box.height / 2);
-                ctx.strokeStyle = 'rgba(0, 240, 255, 0.3)';
-                ctx.stroke();
-
-                // Target label
-                ctx.fillStyle = '#00f0ff';
-                ctx.font = '10px monospace';
-                ctx.fillText('TARGET ACQUIRED', box.x, box.y - 5);
-            });
-        }, 100);
+function loadScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
     });
 }
 
+async function initWebcam() {
+    if (webcamInitialized) return;
+    webcamInitialized = true;
 
-// -----------------------------------------------------------
-// MEMORY ARCHIVE LOGIC
-// -----------------------------------------------------------
+    const video = document.getElementById('webcam-video');
+    const webcamCanvas = document.getElementById('webcam-canvas');
+    const container = video?.closest('.webcam-container');
+    if (!video || !webcamCanvas || !container) return;
+
+    const startStream = () => navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => { video.srcObject = stream; container.classList.add('live'); })
+        .catch(err => console.warn('Camera unavailable:', err));
+
+    try {
+        await loadScriptOnce(FACE_API_SCRIPT);
+        await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_WEIGHTS_URI);
+        await startStream();
+
+        video.addEventListener('play', () => {
+            const displaySize = { width: video.clientWidth, height: video.clientHeight };
+            faceapi.matchDimensions(webcamCanvas, displaySize);
+            setInterval(async () => {
+                if (!isViewActive('security')) return;
+                try {
+                    const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
+                    const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                    const ctx = webcamCanvas.getContext('2d');
+                    ctx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
+
+                    resizedDetections.forEach(detection => {
+                        const box = detection.box;
+                        const accent = getComputedStyle(document.documentElement).getPropertyValue('--cyan').trim() || '#00f0ff';
+                        ctx.strokeStyle = accent;
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                        ctx.beginPath();
+                        ctx.moveTo(box.x + box.width / 2, box.y);
+                        ctx.lineTo(box.x + box.width / 2, box.y + box.height);
+                        ctx.moveTo(box.x, box.y + box.height / 2);
+                        ctx.lineTo(box.x + box.width, box.y + box.height / 2);
+                        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+                        ctx.stroke();
+
+                        ctx.fillStyle = accent;
+                        ctx.font = '10px monospace';
+                        ctx.fillText('TRACKING', box.x, box.y - 5);
+                    });
+                } catch (e) {}
+            }, 350);
+        });
+    } catch (err) {
+        // Model or library unavailable — plain camera feed only
+        console.warn('Face tracking unavailable:', err);
+        startStream();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MEMORY ARCHIVE (Memory view) — confirm-before-delete
+// ═══════════════════════════════════════════════════════════
 const memoryList = document.getElementById('memory-list');
 const memorySearch = document.getElementById('memory-search');
 let allMemories = [];
 
 async function fetchMemories() {
     try {
-        const res = await fetch('/api/memory');
+        const res = await api('/api/memory', { timeout: 8000 });
         if (res.ok) {
             allMemories = await res.json();
-            renderMemories(allMemories);
+            applyMemoryFilter();
         }
-    } catch (e) { console.error('Error fetching memories:', e); }
+    } catch (e) { console.warn('Error fetching memories:', e.message); }
+}
+
+function applyMemoryFilter() {
+    if (!memorySearch) return renderMemories(allMemories);
+    const term = memorySearch.value.toLowerCase();
+    const filtered = allMemories.filter(m => m.content.toLowerCase().includes(term) || (m.category && m.category.toLowerCase().includes(term)));
+    renderMemories(filtered);
 }
 
 function renderMemories(mems) {
     if (!memoryList) return;
+    const prevScroll = memoryList.scrollTop;
     memoryList.innerHTML = '';
     if (mems.length === 0) {
-        memoryList.innerHTML = '<div style="font-size:10px; color:var(--text-dim);">No long-term memories stored.</div>';
+        memoryList.innerHTML = '<div class="mem-empty">No long-term memories stored.</div>';
         return;
     }
     mems.forEach(mem => {
         const div = document.createElement('div');
-        div.style.padding = '5px';
-        div.style.borderBottom = '1px solid rgba(0, 240, 255, 0.1)';
-        div.style.marginBottom = '5px';
-        
+        div.className = 'mem-item';
+
         const header = document.createElement('div');
-        header.style.display = 'flex';
-        header.style.justifyContent = 'space-between';
-        header.style.alignItems = 'center';
-        
+        header.className = 'mem-header';
+
         const cat = document.createElement('span');
-        cat.style.fontSize = '8px';
-        cat.style.color = 'var(--cyan-dim)';
+        cat.className = 'mem-category';
         cat.innerText = mem.category ? mem.category.toUpperCase() : 'GENERAL';
-        
+
         const delBtn = document.createElement('button');
-        delBtn.innerText = 'X';
-        delBtn.style.background = 'none';
-        delBtn.style.border = 'none';
-        delBtn.style.color = 'var(--error)';
-        delBtn.style.cursor = 'pointer';
-        delBtn.style.fontSize = '10px';
+        delBtn.className = 'mem-delete';
+        delBtn.setAttribute('aria-label', 'Delete memory');
+        delBtn.innerText = '×';
         delBtn.onclick = async () => {
+            const confirmed = await confirmAction({
+                title: 'Delete memory',
+                message: 'Permanently delete this memory from the archive?',
+                okLabel: 'DELETE'
+            });
+            if (!confirmed) return;
             try {
-                const res = await fetch(`/api/memory/${mem.id}`, { method: 'DELETE' });
+                const res = await api(`/api/memory/${mem.id}`, { method: 'DELETE' });
                 if(res.ok) fetchMemories();
             } catch(e) {}
         };
-        
+
         header.appendChild(cat);
         header.appendChild(delBtn);
-        
+
         const content = document.createElement('div');
-        content.style.fontSize = '10px';
-        content.style.marginTop = '4px';
-        content.style.color = 'var(--text-main)';
+        content.className = 'mem-content';
         content.innerText = mem.content;
-        
+
         div.appendChild(header);
         div.appendChild(content);
         memoryList.appendChild(div);
     });
+    memoryList.scrollTop = prevScroll;
 }
 
 if (memorySearch) {
-    memorySearch.addEventListener('input', (e) => {
-        const term = e.target.value.toLowerCase();
-        const filtered = allMemories.filter(m => m.content.toLowerCase().includes(term) || (m.category && m.category.toLowerCase().includes(term)));
-        renderMemories(filtered);
-    });
+    memorySearch.addEventListener('input', applyMemoryFilter);
 }
 fetchMemories();
+// Keep MEMORY ARCHIVE in sync when AURA learns new memories
+setInterval(fetchMemories, 10000);
 
-// -----------------------------------------------------------
-// PROACTIVE INTELLIGENCE LOGIC
-// -----------------------------------------------------------
+// ═══════════════════════════════════════════════════════════
+// PROACTIVE INTELLIGENCE (Settings view)
+// ═══════════════════════════════════════════════════════════
 const toggleProactive = document.getElementById('toggle-proactive');
 const threshCpu = document.getElementById('thresh-cpu');
 const threshCpuVal = document.getElementById('thresh-cpu-val');
@@ -1825,15 +1948,14 @@ let proactiveEnabled = true;
 
 async function fetchProactiveConfig() {
     try {
-        const res = await fetch('/api/proactive');
+        const res = await api('/api/proactive', { timeout: 8000 });
         if (res.ok) {
             const config = await res.json();
             proactiveEnabled = config.enabled !== false;
             if(toggleProactive) {
                 toggleProactive.innerText = proactiveEnabled ? 'ON' : 'OFF';
-                toggleProactive.style.color = proactiveEnabled ? 'var(--cyan)' : 'var(--text-dim)';
             }
-            
+
             if (config.thresholds) {
                 if (config.thresholds.cpu_percent && threshCpu) {
                     threshCpu.value = config.thresholds.cpu_percent;
@@ -1860,7 +1982,6 @@ if (toggleProactive) {
     toggleProactive.addEventListener('click', () => {
         proactiveEnabled = !proactiveEnabled;
         toggleProactive.innerText = proactiveEnabled ? 'ON' : 'OFF';
-        toggleProactive.style.color = proactiveEnabled ? 'var(--cyan)' : 'var(--text-dim)';
     });
 }
 
@@ -1878,26 +1999,29 @@ if (btnSaveProactive) {
             }
         };
         try {
-            const res = await fetch('/api/proactive', {
+            const res = await api('/api/proactive', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
             });
             if (res.ok) {
-                btnSaveProactive.innerText = 'SAVED!';
+                btnSaveProactive.innerText = 'SAVED ✓';
                 setTimeout(() => btnSaveProactive.innerText = 'SAVE CONFIG', 2000);
             }
-        } catch(e) {}
+        } catch(e) {
+            showToast('SAVE FAILED', 'Could not save proactive config.', 'error');
+        }
     });
 }
 fetchProactiveConfig();
 
-// ---------------------------------------------------------
-// LOCAL SECURITY CENTER
-// ---------------------------------------------------------
+// ═══════════════════════════════════════════════════════════
+// LOCAL SECURITY CENTER (Security view)
+// ═══════════════════════════════════════════════════════════
 async function fetchSecurity() {
+    if (document.hidden) return;
     try {
-        const res = await fetch('/api/security');
+        const res = await api('/api/security', { timeout: 30000 });
         const data = await res.json();
         if (data.status === 'success') {
             const riskEl = document.getElementById('sec-risk-val');
@@ -1905,26 +2029,27 @@ async function fetchSecurity() {
             if (data.risk_level === 'LOW') {
                 riskEl.style.color = 'var(--green)';
             } else if (data.risk_level === 'MEDIUM') {
-                riskEl.style.color = 'var(--warning)';
+                riskEl.style.color = 'var(--amber)';
             } else {
-                riskEl.style.color = 'var(--error)';
+                riskEl.style.color = 'var(--danger)';
             }
-            
+
             const alertsEl = document.getElementById('sec-alerts-container');
             alertsEl.innerHTML = '';
             if (data.alerts && data.alerts.length > 0) {
                 data.alerts.forEach(alert => {
                     const d = document.createElement('div');
-                    d.style.color = 'var(--error)';
-                    d.style.fontSize = '10px';
-                    d.style.marginBottom = '2px';
+                    d.className = 'sec-alert-line bad';
                     d.innerText = `[!] ${alert}`;
                     alertsEl.appendChild(d);
                 });
             } else {
-                alertsEl.innerHTML = '<div style="color:var(--green);font-size:10px;">[+] No critical alerts</div>';
+                const ok = document.createElement('div');
+                ok.className = 'sec-alert-line ok';
+                ok.innerText = '[+] No critical alerts';
+                alertsEl.appendChild(ok);
             }
-            
+
             const detailsEl = document.getElementById('sec-details-container');
             let details = '';
             if (data.defender) details += data.defender + '\n\n';
@@ -1933,42 +2058,41 @@ async function fetchSecurity() {
             if (data.files) details += data.files + '\n\n';
             if (data.ports) details += data.ports + '\n\n';
             if (data.devices) details += data.devices + '\n\n';
-            
+
             detailsEl.innerText = details.trim();
         }
     } catch (err) {
-        console.error("Security fetch error:", err);
+        console.warn("Security fetch failed:", err.message);
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.getElementById('btn-sec-refresh')?.addEventListener('click', () => {
+    const detailsEl = document.getElementById('sec-details-container');
+    if(detailsEl) detailsEl.innerText = 'Scanning…';
     fetchSecurity();
-    setInterval(fetchSecurity, 30000); // 30s
-
-
-    
-    const btnSec = document.getElementById('btn-sec-refresh');
-    if (btnSec) {
-        btnSec.addEventListener('click', () => {
-            const detailsEl = document.getElementById('sec-details-container');
-            if(detailsEl) detailsEl.innerText = 'Scanning...';
-            fetchSecurity();
-        });
-    }
 });
+fetchSecurity();
+setInterval(fetchSecurity, 30000);
 
 // ═══════════════════════════════════════════════════════════
-// SYSTEM LOGS VIEWER
+// SYSTEM LOGS VIEWER (System view) — diff-render + smart scroll
 // ═══════════════════════════════════════════════════════════
 const logOutput = document.getElementById('log-output');
 const btnLogRefresh = document.getElementById('btn-log-refresh');
+let lastLogsRaw = '';
 
-async function fetchLogs() {
+async function fetchLogs(manual = false) {
     if (!logOutput) return;
+    if (!manual && (document.hidden || !isViewActive('system'))) return;
     try {
-        const res = await fetch('/api/logs');
+        const res = await api('/api/logs', { timeout: 8000 });
         const data = await res.json();
         if (data.status === 'success' && data.lines) {
+            const raw = data.lines.join('\n');
+            if (raw === lastLogsRaw && !manual) return;
+            lastLogsRaw = raw;
+
+            const nearBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 48;
             logOutput.innerHTML = '';
             data.lines.forEach(line => {
                 const div = document.createElement('div');
@@ -1976,19 +2100,66 @@ async function fetchLogs() {
                 div.textContent = line;
                 logOutput.appendChild(div);
             });
-            logOutput.scrollTop = logOutput.scrollHeight;
-        } else {
-            logOutput.innerHTML = `<div class="log-line" style="color:var(--red);">[ERROR] Failed to read logs.</div>`;
+            if (nearBottom || manual) logOutput.scrollTop = logOutput.scrollHeight;
+        } else if (manual) {
+            lastLogsRaw = '';
+            logOutput.innerHTML = '<div class="log-line log-error">[ERROR] Failed to read logs.</div>';
         }
     } catch (e) {
-        logOutput.innerHTML = `<div class="log-line" style="color:var(--red);">[ERROR] Connection failed.</div>`;
+        if (manual) {
+            lastLogsRaw = '';
+            logOutput.innerHTML = '<div class="log-line log-error">[ERROR] Connection failed.</div>';
+        }
     }
 }
 
 if (btnLogRefresh) {
-    btnLogRefresh.addEventListener('click', fetchLogs);
+    btnLogRefresh.addEventListener('click', () => fetchLogs(true));
+}
+// Auto-refresh only while the System view is open
+setInterval(() => {
+    if (isViewActive('system')) fetchLogs();
+}, 10000);
+fetchLogs();
+
+// ═══════════════════════════════════════════════════════════
+// THEME SWITCHER (presets only — Settings view)
+// ═══════════════════════════════════════════════════════════
+function applyPreset(preset) {
+    document.documentElement.classList.remove('theme-crimson', 'theme-emerald', 'theme-violet');
+    if (['theme-crimson', 'theme-emerald', 'theme-violet'].includes(preset)) {
+        document.documentElement.classList.add(preset);
+    }
+    try {
+        localStorage.setItem('aura-theme-v2', JSON.stringify({ preset: preset || '' }));
+    } catch(e) {}
+
+    document.querySelectorAll('.theme-dot').forEach(dot => {
+        const dt = dot.getAttribute('data-theme') || '';
+        const isActive = dt === (preset || '');
+        dot.classList.toggle('active', isActive);
+        dot.setAttribute('aria-pressed', String(isActive));
+    });
 }
 
-// Auto-refresh logs every 3 seconds
-setInterval(fetchLogs, 3000);
-fetchLogs();
+document.querySelectorAll('.theme-dot').forEach(dot => {
+    dot.addEventListener('click', () => applyPreset(dot.getAttribute('data-theme') || ''));
+});
+
+// Load theme on start
+(function loadSavedTheme() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('aura-theme-v2')); } catch (e) {}
+    applyPreset(saved?.preset || '');
+})();
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+setTimeout(loadHistory, 1500);
+updateTelemetry();
+fetchSchedule();
+fetchNetworkScan();
+fetchProcesses();
+refreshScreenPreview();
+fetchThreats();
