@@ -77,6 +77,11 @@ TOOL_RISK_MAP = {
     "run_threat_scan": RiskLevel.CRITICAL
 }
 
+# Confirmation workflow tools must never be blocked themselves,
+# otherwise the agent can never approve its own pending actions (deadlock).
+for _meta_tool in ("confirm_pending_action", "reject_pending_action"):
+    TOOL_RISK_MAP[_meta_tool] = RiskLevel.SAFE
+
 def get_risk_level(tool_name: str) -> RiskLevel:
     """Returns the risk level of a tool. Defaults to CRITICAL for unknown tools for safety."""
     return TOOL_RISK_MAP.get(tool_name, RiskLevel.CRITICAL)
@@ -129,17 +134,14 @@ def confirm_pending_action(action_id: str) -> str:
     return "Action not found or not pending."
     
 def reject_pending_action(action_id: str) -> str:
-    """Rejects a pending action. Use 'all' to reject all."""
+    """Rejects a pending action. Use 'all' to reject all. Rejected actions are removed from the queue."""
     if action_id.lower() == "all":
-        count = 0
-        for aid, data in PENDING_ACTIONS.items():
-            if data["status"] == "PENDING":
-                data["status"] = "REJECTED"
-                count += 1
+        count = len([d for d in PENDING_ACTIONS.values() if d["status"] == "PENDING"])
+        PENDING_ACTIONS.clear()
         return f"Rejected {count} pending actions."
         
     if action_id in PENDING_ACTIONS and PENDING_ACTIONS[action_id]["status"] == "PENDING":
-        PENDING_ACTIONS[action_id]["status"] = "REJECTED"
+        del PENDING_ACTIONS[action_id]
         return f"Action {action_id} rejected."
     return "Action not found or not pending."
 

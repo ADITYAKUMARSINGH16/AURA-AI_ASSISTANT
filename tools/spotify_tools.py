@@ -13,15 +13,27 @@ def search_spotify(query: str) -> str:
         safe_query = urllib.parse.quote(query)
         # Using the spotify: URI scheme will open the desktop app directly to the search page.
         webbrowser.open(f"spotify:search:{safe_query}")
-        
+
         # Give Spotify a moment to open and load the search page
         time.sleep(2)
-        
+
+        # Only send keystrokes if Spotify actually has focus, otherwise Enter
+        # fires into whatever window the user is typing in.
+        try:
+            import pygetwindow as gw
+            active = gw.getActiveWindow()
+            if not active or 'spotify' not in (active.title or "").lower():
+                return (f"Opened Spotify and searched for '{query}', "
+                        f"but Spotify does not have keyboard focus (active window: "
+                        f"'{active.title if active else 'unknown'}'). Press Enter there manually to play.")
+        except Exception:
+            pass  # pygetwindow unavailable - keep legacy behavior
+
         # Press enter twice to start playing the top result
         pyautogui.press('enter')
         time.sleep(0.5)
         pyautogui.press('enter')
-        
+
         return f"Opened Spotify and searched for '{query}'"
     except Exception as e:
         return f"Failed to open Spotify: {e}"

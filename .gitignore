@@ -2,6 +2,18 @@
 __pycache__/
 *.py[cod]
 *$py.class
+**/__pycache__/
+**/*.pyc
+
+# Wakeword Training Datasets and Large Binary Features
+wakeword_training/
+*.npy
+
+# Agent and MCP Test Artifacts / Run State
+.mimosa/
+.playwright-mcp/
+.zcode/
+static/.mimosa/
 
 # Environment
 .env
@@ -29,3 +41,4 @@ aura_agent.log
 # OS
 .DS_Store
 Thumbs.db
+

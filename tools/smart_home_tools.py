@@ -29,37 +29,31 @@ def _run_async(coro):
 
 def discover_smart_devices() -> str:
     """Discovers all available smart lights and smart plugs on the local network."""
+    import os
+
     async def _discover():
         if not wizlight:
             return "[SMART HOME] Error: pywizlight not installed. Cannot discover lights."
-            
+
+        # Broadcast space can be overridden in .env for unusual subnet layouts;
+        # the general broadcast works on ordinary home networks.
+        primary_broadcast = os.environ.get("AURA_WIZ_BROADCAST", "255.255.255.255")
         try:
-            bulbs = await discovery.discover_lights(broadcast_space="192.168.29.255")
+            bulbs = await discovery.discover_lights(broadcast_space=primary_broadcast)
         except Exception:
-            # Fallback to standard broadcast
             try:
                 bulbs = await discovery.discover_lights(broadcast_space="255.255.255.255")
             except Exception:
                 bulbs = []
-                
-        # Also add a hardcoded fallback if discovery fails completely on some routers
-        fallback_ip = "192.168.29.140"
-        found_ips = [b.ip for b in bulbs]
-        if fallback_ip not in found_ips:
-            try:
-                bulb = wizlight(fallback_ip)
-                bulbs.append(bulb)
-            except:
-                pass
-                
+
         count = 0
         for i, bulb in enumerate(bulbs):
             name = f"light_{i+1}"
             DISCOVERED_DEVICES[name] = {"type": "light", "ip": bulb.ip, "mock": False}
             count += 1
-            
+
         plug_count = len([d for d in DISCOVERED_DEVICES.values() if d['type'] == 'plug'])
-        
+
         return f"[SMART HOME] Discovery complete. Found {count} lights and {plug_count} smart plugs on the network."
 
     return _run_async(_discover())

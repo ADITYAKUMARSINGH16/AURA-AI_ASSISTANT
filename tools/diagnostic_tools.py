@@ -131,10 +131,14 @@ def run_aura_diagnostics() -> str:
 
     # 9. NETWORK
     try:
-        urllib.request.urlopen("http://8.8.8.8", timeout=2)
+        # 8.8.8.8 is DNS-only and serves no HTTP, so the old check always
+        # timed out even with a healthy connection. generate_204 returns an
+        # empty 200/204 response specifically for connectivity probes.
+        req = urllib.request.Request("http://www.gstatic.com/generate_204")
+        urllib.request.urlopen(req, timeout=4)
         add_result("NETWORK", "PASS", "Internet uplink is active.")
     except Exception:
-        add_result("NETWORK", "WARNING", "Could not reach 8.8.8.8. Internet might be down.", "Check network connection.")
+        add_result("NETWORK", "WARNING", "Could not reach connectivity probe. Internet might be down.", "Check network connection.")
 
     # 10. SECURITY
     if os.path.exists("permissions.py"):

@@ -212,7 +212,7 @@ function startBootSequence() {
 // ═══════════════════════════════════════════════════════════
 // VIEW ROUTER (sidebar navigation)
 // ═══════════════════════════════════════════════════════════
-const VIEW_NAMES = ['chat', 'system', 'security', 'files', 'memory', 'settings'];
+const VIEW_NAMES = ['chat', 'reactor', 'system', 'security', 'files', 'memory', 'settings'];
 
 function showView(name) {
     if (!VIEW_NAMES.includes(name)) name = 'chat';
@@ -228,11 +228,20 @@ function showView(name) {
     try { localStorage.setItem('aura-view', name); } catch (e) {}
     // Lazy-init panels that own hardware/network resources
     if (name === 'security') initWebcam();
+    // Reactor render loop only burns frames while the Reactor view is up
+    reactor.setActive(name === 'reactor');
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
 });
+
+// ═══════════════════════════════════════════════════════════
+// ARC REACTOR CORE — engine lives in reactor.js (window.AuraReactor)
+// ═══════════════════════════════════════════════════════════
+const reactor = window.AuraReactor || {
+    setState() {}, setActive() {}, feed() {}, clearFeed() {}
+};
 
 // ═══════════════════════════════════════════════════════════
 // VOICE STATE (reactor orb recoloring)
@@ -245,24 +254,43 @@ function setAuraState(state) {
     window.auraState = state;
     const vBtn = document.getElementById('voice-btn');
     const statusEl = vBtn?.querySelector('.core-status');
-    if(!vBtn || !statusEl) return;
-
-    vBtn.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking');
-    vBtn.classList.add(`state-${state}`);
 
     let speed = 1.0;
     switch(state) {
-        case 'idle': speed = 0.8; statusEl.textContent = 'ONLINE'; break;
-        case 'listening': speed = 1.8; statusEl.textContent = 'HEARING'; break;
-        case 'processing': speed = 2.5; statusEl.textContent = 'THINKING'; break;
-        case 'speaking': speed = 1.2; statusEl.textContent = 'SPEAKING'; break;
+        case 'idle': speed = 0.8; break;
+        case 'listening': speed = 1.8; break;
+        case 'processing': speed = 2.5; break;
+        case 'speaking': speed = 1.2; break;
     }
     document.documentElement.style.setProperty('--ring-speed', speed);
+
+    if (vBtn && statusEl) {
+        vBtn.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking');
+        vBtn.classList.add(`state-${state}`);
+        statusEl.textContent =
+            state === 'listening' ? 'HEARING' :
+            state === 'processing' ? 'THINKING' :
+            state === 'speaking' ? 'SPEAKING' : 'ONLINE';
+    }
+
+    // Reactor bay mirrors the same machine
+    const bay = document.getElementById('reactor-bay');
+    if (bay) {
+        bay.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking');
+        bay.classList.add(`state-${state}`);
+    }
+    const rStatus = document.getElementById('reactor-status');
+    if (rStatus) {
+        rStatus.textContent =
+            state === 'listening' ? 'HEARING' :
+            state === 'processing' ? 'THINKING' :
+            state === 'speaking' ? 'SPEAKING' : 'ONLINE';
+    }
+    reactor.setState(state);
 }
 
 const commandInput = document.getElementById('command-input');
 const voiceBtn = document.getElementById('voice-btn');
-const visualizer = document.getElementById('visualizer');
 
 // Toggle between Terminal and Chat modes
 let currentMode = 'terminal';
@@ -283,6 +311,8 @@ function setConsoleMode(mode) {
 
 btnModeTerm.addEventListener('click', () => setConsoleMode('terminal'));
 btnModeChat.addEventListener('click', () => setConsoleMode('chat'));
+// Apply the default mode on load — without this, both outputs render at once
+setConsoleMode(currentMode);
 
 // Initialize clock (system-local timezone)
 function updateClock() {
@@ -365,30 +395,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// WAVEFORM VISUALIZER
+// AUDIO ANALYSERS (mic + TTS feed the reactor)
 // ═══════════════════════════════════════════════════════════
-const numBars = 24;
-for (let i = 0; i < numBars; i++) {
-    const bar = document.createElement('div');
-    bar.className = 'vis-bar';
-    bar.style.height = '10%';
-    bar.style.animationDelay = `${i * 0.05}s`;
-    visualizer.appendChild(bar);
-}
-const bars = document.querySelectorAll('.vis-bar');
-
-function animateVisualizer(isActive) {
-    bars.forEach(bar => {
-        if (isActive) {
-            const h = Math.random() * 90 + 10;
-            bar.style.height = `${h}%`;
-        } else {
-            bar.style.height = '10%';
-        }
-    });
-}
-let visInterval = setInterval(() => animateVisualizer(false), 100);
-
 let audioCtx = null;
 let analyser = null;
 let source = null;
@@ -399,7 +407,6 @@ async function playTTS(text) {
     if (!text) return;
 
     setAuraState('speaking');
-    clearInterval(visInterval);
 
     try {
         await api('/api/voice/speaking', {
@@ -438,18 +445,12 @@ async function playTTS(text) {
         function draw() {
             animationId = requestAnimationFrame(draw);
             analyser.getByteFrequencyData(dataArray);
-
-            bars.forEach((bar, index) => {
-                let value = dataArray[index] || 0;
-                let percent = Math.max(10, (value / 255) * 100);
-                bar.style.height = `${percent}%`;
-            });
+            reactor.feed(dataArray, null);
         }
 
         audio.onended = async () => {
             cancelAnimationFrame(animationId);
-            bars.forEach(bar => bar.style.height = '10%');
-            visInterval = setInterval(() => animateVisualizer(false), 100);
+            reactor.clearFeed();
             URL.revokeObjectURL(url);
             currentAudio = null;
             window._lastPlaybackEnd = Date.now();
@@ -459,10 +460,13 @@ async function playTTS(text) {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({is_speaking: false})
             }).catch(() => {});
-            // Check if we should continue conversation
+            // Continue the conversation only after the anti-echo settle window
+            // (2s) has elapsed, and only if nothing else has taken the mic.
             if (window._continueConversation) {
                 window._continueConversation = false;
-                voiceBtn.click();
+                setTimeout(() => {
+                    if (canStartListening()) voiceBtn.click();
+                }, 2100);
             }
         };
 
@@ -471,7 +475,7 @@ async function playTTS(text) {
 
     } catch (e) {
         console.error("Audio Playback Error:", e);
-        visInterval = setInterval(() => animateVisualizer(false), 100);
+        reactor.clearFeed();
         currentAudio = null;
         window._lastPlaybackEnd = Date.now();
         setAuraState('idle');
@@ -685,8 +689,6 @@ commandInput.addEventListener('keydown', async (e) => {
         enhanceLatestBubble(text);
 
         setAuraState('processing');
-        clearInterval(visInterval);
-        visInterval = setInterval(() => animateVisualizer(true), 100);
 
         try {
             const payload = {
@@ -716,8 +718,6 @@ commandInput.addEventListener('keydown', async (e) => {
 
             thinkingDiv.remove();
             setAuraState('idle');
-            clearInterval(visInterval);
-            visInterval = setInterval(() => animateVisualizer(false), 100);
 
             if (accumulatedText) {
                 const currentBubble = document.createElement('div');
@@ -751,8 +751,6 @@ commandInput.addEventListener('keydown', async (e) => {
         } catch (error) {
             console.error('Chat error:', error);
             setAuraState('idle');
-            clearInterval(visInterval);
-            visInterval = setInterval(() => animateVisualizer(false), 100);
             const msg = ConnectionMonitor.isOffline
                 ? 'CONNECTION FAILED — backend unreachable.'
                 : 'Request failed or timed out.';
@@ -765,9 +763,11 @@ commandInput.addEventListener('keydown', async (e) => {
     }
 });
 
-voiceBtn.addEventListener('click', async () => {
-    // If already playing audio, stop it (barge-in)
+async function startVoiceInteraction() {
+    // If already playing audio, stop it (barge-in). The user is taking over,
+    // so don't auto-relisten when the interrupted playback winds down.
     if (currentAudio) {
+        window._continueConversation = false;
         currentAudio.pause();
         currentAudio.dispatchEvent(new Event('ended')); // Trigger cleanup
         api('/api/voice/stop', { method: 'POST' }).catch(() => {});
@@ -781,9 +781,6 @@ voiceBtn.addEventListener('click', async () => {
     // Start Live Mic Visualization
     startMicVisualization();
 
-    clearInterval(visInterval);
-    visInterval = setInterval(() => animateVisualizer(true), 100);
-
     try {
         const response = await api('/api/voice/listen', { method: 'POST', timeout: 60000 });
         const data = await response.json();
@@ -791,8 +788,6 @@ voiceBtn.addEventListener('click', async () => {
         stopMicVisualization();
         setAuraState('idle');
         voiceBtn.setAttribute('aria-pressed', 'false');
-        clearInterval(visInterval);
-        visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
 
         if (data.status === 'success') {
@@ -804,6 +799,9 @@ voiceBtn.addEventListener('click', async () => {
             } else {
                 await appendToTerminal('No speech detected.', 'system');
             }
+        } else if (data.status === 'no_speech') {
+            // Silence is normal (e.g. nobody answers a follow-up question)
+            await appendToTerminal('No speech detected.', 'system');
         } else {
             await appendToTerminal(data.message || 'VOICE ERROR', 'error');
         }
@@ -811,11 +809,21 @@ voiceBtn.addEventListener('click', async () => {
         stopMicVisualization();
         setAuraState('idle');
         voiceBtn.setAttribute('aria-pressed', 'false');
-        clearInterval(visInterval);
-        visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
         await appendToTerminal('MIC CONNECTION FAILED', 'error');
         showToast('VOICE ERROR', 'Could not reach the voice service.', 'error');
+    }
+}
+
+voiceBtn.addEventListener('click', () => { startVoiceInteraction(); });
+
+// Click-to-listen on the arc reactor core itself (mouse + keyboard)
+const reactorBayEl = document.getElementById('reactor-bay');
+reactorBayEl?.addEventListener('click', () => { startVoiceInteraction(); });
+reactorBayEl?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        startVoiceInteraction();
     }
 });
 
@@ -851,11 +859,6 @@ async function startMicVisualization() {
             micAnimFrame = requestAnimationFrame(renderMic);
 
             micAnalyser.getByteFrequencyData(micDataArray);
-            bars.forEach((bar, index) => {
-                let value = micDataArray[index] || 0;
-                let percent = Math.max(10, (value / 255) * 100);
-                bar.style.height = `${percent}%`;
-            });
 
             micAnalyser.getByteTimeDomainData(micTimeArray);
             let sum = 0;
@@ -864,6 +867,7 @@ async function startMicVisualization() {
                 sum += val * val;
             }
             let rms = Math.sqrt(sum / micTimeArray.length);
+            reactor.feed(micDataArray, micTimeArray);
 
             document.documentElement.style.setProperty('--ring-pulse', rms.toFixed(3));
         }
@@ -878,7 +882,7 @@ function stopMicVisualization() {
     if (micStream) micStream.getTracks().forEach(t => t.stop());
     if (micAudioCtx && micAudioCtx.state !== 'closed') micAudioCtx.close();
 
-    bars.forEach(bar => bar.style.height = '10%');
+    reactor.clearFeed();
     document.documentElement.style.setProperty('--ring-pulse', 0);
 }
 
@@ -1089,8 +1093,6 @@ async function handleFluentCommand(command) {
 
     commandInput.disabled = true;
     setAuraState('processing');
-    clearInterval(visInterval);
-    visInterval = setInterval(() => animateVisualizer(true), 100);
 
     await appendToTerminal(`[SYSTEM ACTION] ${command}`, 'user');
 
@@ -1104,8 +1106,6 @@ async function handleFluentCommand(command) {
         const data = await response.json();
 
         setAuraState('idle');
-        clearInterval(visInterval);
-        visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
 
         if (data.response) {
@@ -1121,8 +1121,6 @@ async function handleFluentCommand(command) {
         }
     } catch (error) {
         setAuraState('idle');
-        clearInterval(visInterval);
-        visInterval = setInterval(() => animateVisualizer(false), 100);
         commandInput.disabled = false;
         await appendToTerminal('CONNECTION FAILED', 'error');
     }

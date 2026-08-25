@@ -18,7 +18,9 @@ def load_memory():
     return []
 
 def save_memory(messages):
-    """Saves the conversation history to the JSON file, keeping only recent messages and trimming old tool outputs."""
+    """Trims the conversation history (in place) and saves it to JSON.
+    Keeps only recent messages and strips old tool outputs to save tokens.
+    Mutates the passed list so the caller's in-memory context stays bounded."""
     if len(messages) <= 1:
         return messages
         
@@ -54,10 +56,13 @@ def save_memory(messages):
         
     final_messages = [system_msg] + history_msgs
     
+    # Mutate the original list in place so the agent's live context is trimmed too
+    messages[:] = final_messages
+    
     try:
         with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
             json.dump(final_messages, f, indent=4)
     except Exception as e:
         print(f"Warning: Could not save memory ({e}).")
         
-    return final_messages
+    return messages

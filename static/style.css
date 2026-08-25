@@ -464,6 +464,8 @@ img { max-width: 100%; }
     font-family: var(--font-mono);
     font-size: 12.5px;
 }
+/* Chat output stays hidden until Chat mode is selected (JS toggles inline display) */
+.console-output.chat-mode { display: none; }
 .terminal-mode > div { white-space: pre-wrap; word-break: break-word; }
 .user-msg { color: var(--cyan); }
 .aura-msg { color: var(--text-primary); }
@@ -595,30 +597,6 @@ img { max-width: 100%; }
 }
 .attach-remove:hover { color: var(--danger); }
 
-/* Waveform strip */
-.waveform-strip {
-    height: 26px;
-    margin-top: auto;
-    padding-top: var(--space-3);
-    display: flex;
-    align-items: flex-end;
-}
-.visualizer {
-    display: flex;
-    align-items: flex-end;
-    gap: 3px;
-    width: 100%;
-    height: 100%;
-    opacity: 0.75;
-}
-.vis-bar {
-    flex: 1;
-    min-height: 10%;
-    background: linear-gradient(to top, var(--cyan-dim), var(--cyan-mid));
-    border-radius: 2px;
-    transition: height 0.09s linear;
-}
-
 /* Quick actions */
 .quick-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap; }
 
@@ -735,6 +713,83 @@ img { max-width: 100%; }
 }
 .voice-orb.state-speaking .orb-ring { border-color: var(--purple); }
 .voice-orb.state-speaking .core-status { color: var(--purple); }
+
+/* ── Arc reactor bay (signature moment) ── */
+.reactor-bay {
+    position: relative;
+    height: clamp(150px, 20vh, 200px);
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background:
+        radial-gradient(ellipse at 50% 44%, var(--cyan-ghost), transparent 72%);
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color var(--dur-med), background var(--dur-med), box-shadow var(--dur-med);
+}
+.reactor-bay:hover {
+    border-color: var(--border-accent);
+    background:
+        radial-gradient(ellipse at 50% 44%, var(--cyan-dim), transparent 74%);
+}
+.reactor-bay:focus-visible {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 2px var(--cyan-mid);
+}
+#reactor-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.reactor-status {
+    position: absolute;
+    bottom: 9px;
+    left: 0;
+    right: 0;
+    z-index: 1;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    color: var(--text-faint);
+    user-select: none;
+    pointer-events: none;
+    transition: color var(--dur-med);
+}
+.reactor-bay.state-idle .reactor-status { color: var(--cyan); }
+.reactor-bay.state-listening .reactor-status { color: var(--green); }
+.reactor-bay.state-processing .reactor-status { color: var(--amber); }
+.reactor-bay.state-speaking .reactor-status { color: var(--purple); }
+
+/* ── Reactor view (bay docked full-size) ── */
+#view-reactor.active { display: flex; }
+.reactor-view-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    width: 100%;
+}
+.reactor-stage { flex: 1; min-height: 0; display: flex; }
+#view-reactor .reactor-bay {
+    flex: 1;
+    width: 100%;
+    height: auto;
+    min-height: 240px;
+    margin-bottom: 0;
+}
+.reactor-caption {
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    color: var(--text-faint);
+    user-select: none;
+}
 
 /* ── Chat rail ── */
 .chat-rail {
@@ -1356,6 +1411,5 @@ img { max-width: 100%; }
 /* ═══════════════ REDUCED MOTION ═══════════════ */
 @media (prefers-reduced-motion: reduce) {
     .orb-ring { animation: none !important; opacity: 0 !important; }
-    .vis-bar { transition: none !important; }
     .boot-logo-img { animation: none !important; }
 }

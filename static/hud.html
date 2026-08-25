@@ -6,6 +6,7 @@
     <title>AURA // AI Assistant</title>
     <link rel="icon" type="image/webp" href="logo_small.webp">
     <link rel="stylesheet" href="tokens.css">
+    <link rel="stylesheet" href="reactor.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -34,6 +35,10 @@
                 <button class="nav-item active" data-view="chat" aria-pressed="true" title="Chat">
                     <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     <span class="nav-label">Chat</span>
+                </button>
+                <button class="nav-item" data-view="reactor" aria-pressed="false" title="Reactor">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z"/><path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z"/></svg>
+                    <span class="nav-label">Reactor</span>
                 </button>
                 <button class="nav-item" data-view="system" aria-pressed="false" title="System">
                     <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
@@ -112,10 +117,6 @@
 
                             <div id="attachment-preview" class="attachment-preview"></div>
 
-                            <div class="waveform-strip" aria-hidden="true">
-                                <div id="visualizer" class="visualizer"><!-- bars via JS --></div>
-                            </div>
-
                             <div class="quick-actions" aria-label="Quick actions">
                                 <button class="qa-btn" id="qa-read-screen" title="Read Screen">
                                     <svg viewBox="0 0 24 24"><path d="M2 12h20M12 2v20M5 5l14 14M19 5L5 19"/></svg>
@@ -187,6 +188,20 @@
                             </div>
                         </aside>
 
+                    </div>
+                </section>
+
+                <!-- ══════════ VIEW: REACTOR ══════════ -->
+                <section class="view" id="view-reactor" data-title="Reactor">
+                    <div class="reactor-view-layout">
+                        <div class="reactor-stage" id="reactor-stage">
+                            <div class="reactor-bay state-idle" id="reactor-bay" role="button" tabindex="0"
+                                 aria-label="AURA reactor core — click to start voice input" title="Talk to AURA">
+                                <canvas id="reactor-canvas" aria-hidden="true"></canvas>
+                                <div class="reactor-status" id="reactor-status" aria-live="polite">ONLINE</div>
+                            </div>
+                        </div>
+                        <div class="reactor-caption">TALK TO AURA</div>
                     </div>
                 </section>
 
@@ -503,6 +518,7 @@
     <script src="vendor/purify.min.js"></script>
     <script src="vendor/highlight.min.js"></script>
     <script src="vendor/d3.min.js"></script>
+    <script src="reactor.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

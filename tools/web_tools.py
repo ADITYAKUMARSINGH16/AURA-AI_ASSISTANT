@@ -1,4 +1,8 @@
-from ddgs import DDGS
+try:
+    from ddgs import DDGS
+except ImportError:
+    # Fallback to the legacy package name
+    from duckduckgo_search import DDGS
 
 def web_search(query: str, max_results: int = 3) -> str:
     """

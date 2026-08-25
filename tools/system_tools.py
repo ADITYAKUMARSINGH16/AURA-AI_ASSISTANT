@@ -92,8 +92,8 @@ def read_screen(prompt: str = "Describe what is on this screen in detail, includ
         # Grab screenshot
         screenshot = ImageGrab.grab()
         
-        # Save original screenshot for HUD
-        capture_dir = os.path.join("static", "captures")
+        # Save original screenshot for HUD (kept OUTSIDE the web-served static dir)
+        capture_dir = "captures"
         if not os.path.exists(capture_dir):
             os.makedirs(capture_dir)
         screenshot.save(os.path.join(capture_dir, "last_screen.png"))
@@ -123,7 +123,12 @@ def run_threat_scan() -> str:
     try:
         import psutil
         threats = []
-        # Check for processes using excessive CPU or Memory (mocking a threat heuristics scan)
+        # Prime per-process CPU counters: the first read after startup always
+        # returns 0.0, which made every scan report "no anomalies".
+        for proc in psutil.process_iter(['pid']):
+            pass
+        import time as _time
+        _time.sleep(0.5)
         for proc in psutil.process_iter(['name', 'cpu_percent', 'memory_percent']):
             try:
                 info = proc.info

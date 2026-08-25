@@ -9,7 +9,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 import psutil
-import random
 
 from agent import create_agent
 from voice import speak, listen, generate_tts_file, start_wakeword_listener
@@ -17,15 +16,26 @@ from voice import speak, listen, generate_tts_file, start_wakeword_listener
 app = FastAPI(title="AURA API")
 
 import threading
+import time
 
 # Initialize global agent
 agent = create_agent()
 agent_lock = threading.Lock()
 
-pending_notifications = []
+from notifications import push_notification
+import queue as _queue
+
+# Timestamps paired 1:1 with queued wake-word signals (FIFO, same order).
+_wake_signal_times = _queue.Queue()
+
+WAKE_SIGNAL_MAX_AGE = 10  # seconds
 
 def wake_word_callback():
-    pending_notifications.append("__WAKE_WORD__")
+    # If no HUD is open when "Hey Aura" is heard, the signal would otherwise
+    # sit in the queue and replay much later - making AURA start listening
+    # out of nowhere the next time a HUD tab loads.
+    _wake_signal_times.put(time.time())
+    push_notification("__WAKE_WORD__")
 
 # Start background wake word listener
 start_wakeword_listener(wake_word_callback)
@@ -77,13 +87,10 @@ async def get_telemetry():
             uplink = int(match.group(1))
     except Exception:
         pass
-    
-    # Fallback to a random value if ethernet/no wifi
-    if uplink == 0:
-        uplink = random.randint(85, 100)
         
     # --- HARDWARE THERMALS ---
-    # CPU Temp: Attempt to read real sensors via WMI (Requires Admin)
+    # CPU Temp: Attempt to read real sensors via WMI (Requires Admin).
+    # No simulation: report null when real sensors are unavailable.
     cpu_temp = None
     try:
         import wmi
@@ -94,12 +101,8 @@ async def get_telemetry():
     except Exception:
         pass
         
-    # Fallback to simulated if WMI fails (e.g., standard user permissions)
-    if cpu_temp is None:
-        cpu_temp = int(45 + (cpu * 0.40))  # Base 45C + up to 40C under full load
-        
-    # CPU Fan: Win32_Fan is rarely populated on Windows laptops, fallback to load-based simulation
-    cpu_fan = int(2000 + (cpu * 35))   # Base 2000 RPM + up to 3500 extra under full load
+    # Win32_Fan is rarely populated on Windows; report null rather than a simulated RPM
+    cpu_fan = None
     
     # GPU: Real data via nvidia-smi
     gpu_temp = 0
@@ -120,7 +123,7 @@ async def get_telemetry():
             else:
                 gpu_fan = "AUTO"
     except Exception:
-        gpu_temp = 40
+        gpu_temp = None
         gpu_mem = "N/A"
         gpu_fan = "N/A"
     
@@ -143,8 +146,6 @@ async def get_telemetry():
         "memory": int(mem),
         "power": int(power),
         "uplink": uplink,
-        "latency": f"{random.randint(8, 28)}ms",
-        "nodes": random.randint(35, 65),
         "tasks": len(psutil.pids()),
         "threats": "00",
         "cpu_temp": cpu_temp,
@@ -155,12 +156,13 @@ async def get_telemetry():
         "ai": {
             "model": OLLAMA_MODEL.upper().split(':')[0],
             "vram": vram_gb,
-            "telemetry": agent.ai_telemetry if 'agent' in globals() else {}
+            "telemetry": agent.ai_telemetry
         }
     }
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+    # Runs as a sync handler (threadpool) because agent.send_message blocks for a long time.
     # Send message and get response
     with agent_lock:
         response_text = agent.send_message(req.message, images=req.images, file_texts=req.file_texts)
@@ -169,6 +171,15 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     # The frontend will hit /api/tts to fetch the audio and play it.
         
     return {"status": "success", "response": response_text}
+
+@app.get("/api/captures/last_screen")
+async def get_last_screen():
+    """Serves the last screen capture from outside the web-served static directory."""
+    import os
+    path = os.path.join("captures", "last_screen.png")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="image/png")
+    return {"status": "error", "message": "No screen capture available yet."}
 
 @app.get("/api/permissions/pending")
 async def get_pending_permissions():
@@ -200,25 +211,33 @@ async def set_trusted_mode(req: Request):
     return {"status": "success", "enabled": enabled}
 
 @app.get("/api/tts")
-async def tts(text: str):
+def tts(text: str):
     import os
     if not text:
         return {"error": "No text provided"}
+    if len(text) > 2000:
+        # Bound synthesis time and temp-file size; spoken replies don't need
+        # unbounded input from a query parameter.
+        text = text[:2000]
     
-    # Generate the TTS file
+    # Generate the TTS file (blocking, so this endpoint runs in a threadpool)
     filepath = generate_tts_file(text)
     
-    if os.path.exists(filepath):
-        return FileResponse(filepath, media_type="audio/mpeg")
+    if filepath and os.path.exists(filepath):
+        media_type = "audio/mpeg" if filepath.lower().endswith(".mp3") else "audio/wav"
+        return FileResponse(filepath, media_type=media_type)
     return {"error": "Failed to generate TTS"}
 
 @app.post("/api/voice/listen")
-async def voice_listen(background_tasks: BackgroundTasks):
-    # Listen locally
+def voice_listen(background_tasks: BackgroundTasks):
+    # listen() blocks on the microphone for seconds, so this must NOT be an async handler
     text = listen()
     
-    if not text or text == "SWITCH_TO_TEXT_MODE":
-        return {"status": "error", "message": "Voice input failed or no speech detected."}
+    if text == "SWITCH_TO_TEXT_MODE":
+        return {"status": "error", "message": "Voice input failed — microphone unavailable."}
+    if not text:
+        # Silence is a normal outcome, not an error
+        return {"status": "no_speech", "message": "No speech detected."}
     
     # We got speech — now send it through the agent
     with agent_lock:
@@ -249,19 +268,41 @@ class SpeakingStatus(BaseModel):
 async def set_speaking_status(status: SpeakingStatus):
     import voice
     voice.is_speaking = status.is_speaking
+    # HUD playback happens in the browser; this POST is how the backend learns
+    # audible speech actually ended (it starts listen()'s anti-echo settle window).
+    if not status.is_speaking:
+        voice._mark_speech_end()
     return {"status": "success"}
 
 
+class WakeWordStatus(BaseModel):
+    enabled: bool
+
+@app.post("/api/wakeword/toggle")
+async def toggle_wakeword(req: WakeWordStatus):
+    import voice
+    voice.set_wakeword_enabled(req.enabled)
+    return {"status": "success", "enabled": req.enabled}
+
+@app.get("/api/wakeword/status")
+async def wakeword_status():
+    import voice
+    return {"enabled": voice.wakeword_enabled}
+
+
 @app.post("/api/voice/wake_and_listen")
-async def wake_and_listen(background_tasks: BackgroundTasks):
+def wake_and_listen(background_tasks: BackgroundTasks):
     # Greet the user first (this call is synchronous and will block until done)
     speak("I am listening.")
     
     # Listen locally
     text = listen()
     
-    if not text or text == "SWITCH_TO_TEXT_MODE":
-        return {"status": "error", "message": "Voice input failed or no speech detected."}
+    if text == "SWITCH_TO_TEXT_MODE":
+        return {"status": "error", "message": "Voice input failed — microphone unavailable."}
+    if not text:
+        # Silence is a normal outcome, not an error
+        return {"status": "no_speech", "message": "No speech detected."}
     
     # We got speech — now send it through the agent
     with agent_lock:
@@ -280,12 +321,21 @@ async def wake_and_listen(background_tasks: BackgroundTasks):
     }
 @app.get("/api/notifications")
 async def get_notifications():
-    global pending_notifications
-    if pending_notifications:
-        # Pop the oldest notification
-        msg = pending_notifications.pop(0)
+    while True:
+        msg = pop_notification()
+        if msg is None:
+            return {"has_notification": False}
+        if msg == "__WAKE_WORD__":
+            try:
+                ts = _wake_signal_times.get_nowait()
+            except _queue.Empty:
+                ts = None
+            # Drop stale wake signals: they are only actionable for a few
+            # seconds after the word was actually heard.
+            if ts is None or (time.time() - ts) > WAKE_SIGNAL_MAX_AGE:
+                continue
+            return {"has_notification": True, "message": msg}
         return {"has_notification": True, "message": msg}
-    return {"has_notification": False}
 
 class ScheduleEvent(BaseModel):
     time: str
@@ -314,34 +364,26 @@ async def add_schedule(event: ScheduleEvent):
 
 @app.get("/api/memory")
 async def get_memory():
-    import json
-    import os
-    ltm_file = "long_term_memory.json"
-    if not os.path.exists(ltm_file):
-        return []
+    from tools.memory_tools import _load_ltm
     try:
-        with open(ltm_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        db = _load_ltm()
+        return db.get("semantic", []) + db.get("episodic", []) + db.get("procedural", [])
     except Exception:
         return []
 
 @app.delete("/api/memory/{memory_id}")
 async def delete_memory(memory_id: str):
-    import json
-    import os
-    ltm_file = "long_term_memory.json"
-    if not os.path.exists(ltm_file):
-        return {"status": "error", "message": "Memory file not found"}
+    from tools.memory_tools import _load_ltm, _save_ltm
     try:
-        with open(ltm_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            
-        initial_len = len(data)
-        data = [mem for mem in data if mem.get("id") != memory_id]
-        
-        if len(data) < initial_len:
-            with open(ltm_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+        db = _load_ltm()
+        deleted = False
+        for layer in ["semantic", "episodic", "procedural"]:
+            initial_len = len(db[layer])
+            db[layer] = [mem for mem in db[layer] if mem.get("id") != memory_id]
+            if len(db[layer]) < initial_len:
+                deleted = True
+        if deleted:
+            _save_ltm(db)
             return {"status": "success"}
         return {"status": "error", "message": "ID not found"}
     except Exception as e:
@@ -349,7 +391,6 @@ async def delete_memory(memory_id: str):
 
 @app.get("/api/proactive")
 async def get_proactive():
-    from api import load_proactive_config
     return load_proactive_config()
 
 class ProactiveConfigUpdate(BaseModel):
@@ -411,13 +452,29 @@ async def get_processes():
 class ProcessKillRequest(BaseModel):
     pid: int
 
+# Processes that must never be killable through the API, even by accident.
+_PROTECTED_PROCESS_NAMES = {
+    "system", "registry", "smss.exe", "csrss.exe", "wininit.exe",
+    "winlogon.exe", "services.exe", "lsass.exe", "svchost.exe",
+    "dwm.exe", "explorer.exe", "python.exe",
+}
+
 @app.post("/api/processes/kill")
 async def kill_process(req: ProcessKillRequest):
     try:
         import psutil
         p = psutil.Process(req.pid)
+        name = (p.name() or "").lower()
+        if req.pid in (0, 4) or name in _PROTECTED_PROCESS_NAMES:
+            return {"status": "error", "message": f"Refusing to terminate protected process '{name or req.pid}'."}
+        if name == "ollama.exe" or "ollama" in name:
+            return {"status": "error", "message": "Refusing to kill the Ollama runtime from the HUD. Stop it manually if truly needed."}
         p.kill()
         return {"status": "success"}
+    except psutil.NoSuchProcess:
+        return {"status": "error", "message": "Process not found."}
+    except psutil.AccessDenied:
+        return {"status": "error", "message": "Access denied (try running AURA as Administrator)."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -515,7 +572,6 @@ async def get_fs(path: str = ""):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-import time
 from datetime import datetime
 
 def load_proactive_config():
@@ -553,9 +609,10 @@ def get_top_process():
     except:
         return "unknown process"
 
+from notifications import pop_notification, push_notification
+
 def run_schedule():
     """Background thread that runs scheduled tasks and proactive telemetry monitoring."""
-    global pending_notifications
     briefing_done_today = False
     
     violations = {
@@ -579,7 +636,7 @@ def run_schedule():
             print("[SCHEDULER] Triggering morning briefing...")
             with agent_lock:
                 response = agent.send_message("Good morning AURA! Please give me my daily morning briefing including the time and a short motivational quote.")
-            pending_notifications.append(response)
+            push_notification(response)
             briefing_done_today = True
             
         if now.hour == 0 and now.minute == 0:
@@ -604,7 +661,7 @@ def run_schedule():
                     
                 if violations["cpu"] >= VIOLATION_LIMIT and cooldowns["cpu"] <= 0:
                     top_proc = get_top_process()
-                    pending_notifications.append(f"Sir, CPU usage has sustained above {thresh.get('cpu_percent', 90)}% for 5 minutes. Top consuming process is {top_proc}.")
+                    push_notification(f"Sir, CPU usage has sustained above {thresh.get('cpu_percent', 90)}% for 5 minutes. Top consuming process is {top_proc}.")
                     cooldowns["cpu"] = cool_max
                     violations["cpu"] = 0
 
@@ -616,7 +673,7 @@ def run_schedule():
                     violations["ram"] = 0
                     
                 if violations["ram"] >= VIOLATION_LIMIT and cooldowns["ram"] <= 0:
-                    pending_notifications.append(f"Sir, RAM usage has sustained above {thresh.get('ram_percent', 90)}% for 5 minutes.")
+                    push_notification(f"Sir, RAM usage has sustained above {thresh.get('ram_percent', 90)}% for 5 minutes.")
                     cooldowns["ram"] = cool_max
                     violations["ram"] = 0
                     
@@ -628,7 +685,7 @@ def run_schedule():
                     violations["disk"] = 0
                     
                 if violations["disk"] >= VIOLATION_LIMIT and cooldowns["disk"] <= 0:
-                    pending_notifications.append(f"Sir, your C: drive is almost full, sustained above {thresh.get('disk_percent', 90)}% capacity.")
+                    push_notification(f"Sir, your C: drive is almost full, sustained above {thresh.get('disk_percent', 90)}% capacity.")
                     cooldowns["disk"] = cool_max
                     violations["disk"] = 0
                     
@@ -640,7 +697,7 @@ def run_schedule():
                     violations["battery"] = 0
                     
                 if violations["battery"] >= 2 and cooldowns["battery"] <= 0:
-                    pending_notifications.append(f"Sir, your battery is running critically low at {battery.percent}%. Please plug in your device.")
+                    push_notification(f"Sir, your battery is running critically low at {battery.percent}%. Please plug in your device.")
                     cooldowns["battery"] = cool_max
                     violations["battery"] = 0
                     
@@ -658,7 +715,7 @@ def run_schedule():
                         violations["gpu_temp"] = 0
                         
                     if violations["gpu_temp"] >= VIOLATION_LIMIT and cooldowns["gpu_temp"] <= 0:
-                        pending_notifications.append(f"Sir, GPU temperature has been above {thresh.get('gpu_temp_c', 85)}°C for 5 minutes. Consider checking your cooling.")
+                        push_notification(f"Sir, GPU temperature has been above {thresh.get('gpu_temp_c', 85)}°C for 5 minutes. Consider checking your cooling.")
                         cooldowns["gpu_temp"] = cool_max
                         violations["gpu_temp"] = 0
                 except:
@@ -687,7 +744,7 @@ def run_schedule():
                             
                         diff = (evt_dt - now).total_seconds()
                         if 0 <= diff <= 300 and evt_id not in cooldowns["schedule"]:
-                            pending_notifications.append(f"Reminder: Your scheduled task '{evt_name}' is due shortly at {evt_time_str}.")
+                            push_notification(f"Reminder: Your scheduled task '{evt_name}' is due shortly at {evt_time_str}.")
                             cooldowns["schedule"][evt_id] = True
                     except:
                         pass
@@ -737,10 +794,20 @@ def run_schedule():
                 
                 # Build context using allowed tools
                 tool_context = "Available data from allowed tools:\n"
+                import inspect
                 from agent import tool_map
                 for t_name in g.get("allowed_tools", []):
                     if t_name in tool_map:
                         try:
+                            sig = inspect.signature(tool_map[t_name])
+                            required = [
+                                p.name for p in sig.parameters.values()
+                                if p.default is inspect.Parameter.empty
+                                and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                            ]
+                            if required:
+                                tool_context += f"- {t_name}: Skipped (requires arguments: {', '.join(required)})\n"
+                                continue
                             res = str(tool_map[t_name]())
                             tool_context += f"- {t_name}: {res[:500]}\n"
                         except Exception as e:
@@ -765,7 +832,7 @@ DO NOT perform any destructive actions."""
                     )
                     out = res['message']['content'].strip()
                     if out and "ALL_GOOD" not in out:
-                        pending_notifications.append(out)
+                        push_notification(out)
                         g["last_notified"] = now.isoformat()
                 except Exception as e:
                     print(f"Goal evaluation error: {e}")
@@ -788,5 +855,9 @@ app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting AURA Web Server on http://localhost:8000")
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    # Loopback bind only: the API can browse the filesystem, kill processes
+    # and control the machine. It must never be reachable from the LAN.
+    # reload=False: the reloader re-imports this module in a second process,
+    # which would duplicate the agent, wake-word listener and scheduler.
+    print("Starting AURA Web Server on http://127.0.0.1:8000")
+    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=False)

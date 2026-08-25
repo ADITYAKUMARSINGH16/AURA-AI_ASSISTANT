@@ -4,6 +4,7 @@ import subprocess
 import os
 import sys
 import webbrowser
+from datetime import datetime
 
 def create_image():
     # Generate an icon if logo.jpg is missing
@@ -13,11 +14,15 @@ def create_image():
     dc.rectangle((24, 24, 40, 40), fill=(0, 0, 0))
     return image
 
-# Start the backend server invisibly
+# Start the backend server with output captured to a file — DEVNULL made
+# silent startup failures (port conflicts, model load errors) undiagnosable.
+_backend_log = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "aura_backend_console.log"), "ab", buffering=0)
+_backend_log.write(f"\n=== AURA backend launched {datetime.now():%Y-%m-%d %H:%M:%S} ===\n".encode())
 backend_process = subprocess.Popen(
     [sys.executable, "-m", "uvicorn", "api:app", "--host", "127.0.0.1", "--port", "8000"],
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
+    stdout=_backend_log,
+    stderr=subprocess.STDOUT,
     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 )
 

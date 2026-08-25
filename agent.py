@@ -2,9 +2,10 @@ import ollama
 import logging
 import threading
 import time
+import re
 from tools import get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, recall_fact, search_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, forget_fact, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, run_aura_diagnostics
 from permissions import confirm_pending_action, reject_pending_action, evaluate_permission
-from config import OLLAMA_MODEL
+from config import OLLAMA_MODEL, chat_options, OLLAMA_KEEP_ALIVE
 from memory import load_memory, save_memory
 import json
 
@@ -33,6 +34,13 @@ TOOL_CATEGORIES = {
 }
 
 def analyze_intent(user_input: str) -> dict:
+    # The router costs a full LLM pass (30s+ on 4 GB VRAM). Allow opting out
+    # via .env; the agent then falls back to the full toolset per message.
+    import os
+    if os.environ.get("AURA_INTENT_ROUTER", "on").strip().lower() in ("off", "false", "0"):
+        return {"categories": [], "is_simple": False, "is_dangerous": False,
+                "requires_plan": False, "active_skill": None}
+
     from skill_registry import registry
     skill_desc = registry.get_all_skill_descriptions()
     router_prompt = f"""
@@ -53,20 +61,36 @@ Return ONLY a valid JSON object matching this schema:
   "active_skill": "skill_name"
 }}
 """
-    try:
-        response = ollama.chat(
-            model=OLLAMA_MODEL,
-            messages=[
-                {'role': 'system', 'content': router_prompt},
-                {'role': 'user', 'content': user_input}
-            ],
-            format="json"
-        )
-        content = response['message']['content']
-        return json.loads(content)
-    except Exception as e:
-        logging.error(f"Router error: {e}")
-        return {"categories": ["CHAT", "SYSTEM", "COMPUTER_CONTROL", "FILE", "WEB_RESEARCH", "MEMORY", "SMART_HOME", "SECURITY"], "is_simple": False, "is_dangerous": False, "requires_plan": False, "active_skill": None}
+    router_fallback = {"categories": ["CHAT", "SYSTEM", "COMPUTER_CONTROL", "FILE", "WEB_RESEARCH", "MEMORY", "SMART_HOME", "SECURITY"], "is_simple": False, "is_dangerous": False, "requires_plan": False, "active_skill": None}
+    for attempt in range(2):
+        try:
+            response = ollama.chat(
+                model=OLLAMA_MODEL,
+                messages=[
+                    {'role': 'system', 'content': router_prompt},
+                    {'role': 'user', 'content': user_input}
+                ],
+                format="json",
+                options=chat_options(num_predict=128 if attempt == 0 else 512),
+                keep_alive=OLLAMA_KEEP_ALIVE
+            )
+            content = response['message']['content'].strip()
+            # Small models occasionally wrap JSON in code fences or prose; peel it off.
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+            if not content:
+                raise ValueError("model returned empty content")
+            start, end = content.find('{'), content.rfind('}')
+            if start != -1 and end > start:
+                content = content[start:end + 1]
+            return json.loads(content)
+        except Exception as e:
+            logging.warning(f"Router attempt {attempt + 1} failed: {e}")
+    logging.error("Router failed after retry; using permissive fallback.")
+    return router_fallback
 
 
 system_instruction = """
@@ -152,6 +176,10 @@ class AuraAgent:
             self.messages = [
                 {'role': 'system', 'content': system_instruction}
             ]
+        # Tracks a request we refused as dangerous so the user's next
+        # conversational "yes" can let it through instead of being
+        # re-classified dangerous forever (confirmation deadlock).
+        self._pending_danger = None  # (timestamp, original_input)
         
     def send_message(self, user_input: str, images: list = None, file_texts: list = None) -> str:
         """Sends a message to the agent and returns its text response."""
@@ -173,9 +201,31 @@ class AuraAgent:
         active_skill = intent.get('active_skill')
         
         logging.info(f"[SUBSYSTEM_ROUTING] Active Categories: {categories} | Plan: {requires_plan} | Dangerous: {is_dangerous} | Skill: {active_skill}")
-        
+
         if is_dangerous:
-            return "WARNING: The action you requested is classified as potentially dangerous or destructive. Please re-confirm explicitly that you want to proceed."
+            # If this input is an explicit confirmation of the request we just
+            # warned about, let it proceed (tools remain individually gated by
+            # evaluate_permission, so CRITICAL tools still queue for approval).
+            pending = self._pending_danger
+            confirmed = (
+                pending is not None
+                and (time.time() - pending[0]) < 300
+                and re.fullmatch(
+                    r"(yes|y|yes please|yep|yeah|sure|ok|okay|proceed|go ahead|"
+                    r"do it|i confirm|confirm|confirmed|i am sure|i'm sure)[!.]?",
+                    user_input.strip().lower()
+                )
+            )
+            if not confirmed:
+                self._pending_danger = (time.time(), original_user_input)
+                warning = "WARNING: The action you requested is classified as potentially dangerous or destructive. Please re-confirm explicitly that you want to proceed."
+                # Keep conversation history consistent even when we bail out early
+                self.messages.append({'role': 'user', 'content': original_user_input})
+                self.messages.append({'role': 'assistant', 'content': warning})
+                save_memory(self.messages)
+                return warning
+            # Confirmation accepted; clear it so a later "yes" can't approve something new.
+            self._pending_danger = None
 
         active_tools = []
         for cat in categories:
@@ -244,14 +294,28 @@ class AuraAgent:
 
         self.messages.append(msg)
         
+        MAX_TOOL_ITERATIONS = 12  # Safety cap so a looping model can't run tools forever
+        tool_iterations = 0
         while True:
+            tool_iterations += 1
+            if tool_iterations > MAX_TOOL_ITERATIONS:
+                logging.warning(f"Tool loop exceeded {MAX_TOOL_ITERATIONS} iterations; forcing stop.")
+                msg_dict = {
+                    'role': 'assistant',
+                    'content': "I was unable to complete this task within the allowed number of tool operations, so I have stopped to avoid looping. Please check the last result or rephrase the task."
+                }
+                self.messages.append(msg_dict)
+                break
+            
             logging.info(f"Sending request to model with {len(self.messages)} messages in context.")
             try:
                 m_start = time.time()
                 response = ollama.chat(
                     model=OLLAMA_MODEL,
                     messages=self.messages,
-                    tools=active_tools if active_tools else None
+                    tools=active_tools if active_tools else None,
+                    options=chat_options(),
+                    keep_alive=OLLAMA_KEEP_ALIVE
                 )
                 m_end = time.time()
                 
@@ -287,7 +351,9 @@ class AuraAgent:
                 try:
                     retry_response = ollama.chat(
                         model=OLLAMA_MODEL,
-                        messages=self.messages
+                        messages=self.messages,
+                        options=chat_options(),
+                        keep_alive=OLLAMA_KEEP_ALIVE
                         # Intentionally omitting tools=available_tools
                     )
                     message = retry_response['message']
@@ -384,7 +450,10 @@ class AuraAgent:
                 
         logging.info(f"Returning final content to user (Length: {len(final_content)})")
         
-        if final_content:
+        if final_content and (len(original_user_input) + len(final_content)) > 80:
+            # Skip the background memory-extraction LLM call for trivial
+            # exchanges ("hi"/"thanks") - on 4 GB VRAM every extra generation
+            # competes with the user's next request.
             threading.Thread(target=extract_and_store_memory, args=(original_user_input, final_content), daemon=True).start()
             
         return final_content

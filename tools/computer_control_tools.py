@@ -13,6 +13,31 @@ try:
 except ImportError:
     logging.warning("pyautogui is not installed. Computer control tools will fail.")
 
+
+def _env_timeout() -> int:
+    """Visual-agent budget in seconds. Each loop iteration spends several seconds
+    on a VLM call plus actions, so the old fixed 60s often expired mid-task."""
+    try:
+        return int(os.environ.get("AURA_VISUAL_TASK_TIMEOUT", "120"))
+    except ValueError:
+        return 120
+
+
+def _scale_to_screen(x, y, img_w, img_h) -> tuple[int, int]:
+    """Map a pixel position in the screenshot to real screen coordinates.
+
+    With Windows display scaling (125%/150%) or multi-monitor offsets, the
+    screenshot's pixel grid does not match PyAutoGUI's coordinate grid; without
+    scaling, OCR-derived clicks land on the wrong UI element.
+    """
+    try:
+        screen_w, screen_h = pyautogui.size()
+    except Exception:
+        return int(x), int(y)
+    if not img_w or not img_h or (img_w == screen_w and img_h == screen_h):
+        return int(x), int(y)
+    return int(round(x * screen_w / img_w)), int(round(y * screen_h / img_h))
+
 def execute_visual_task(goal: str, require_confirmation: bool = False) -> str:
     """
     Executes a UI goal using a closed-loop visual agent (OBSERVE -> PLAN -> ACT -> VERIFY).
@@ -20,6 +45,7 @@ def execute_visual_task(goal: str, require_confirmation: bool = False) -> str:
     """
     import ollama
     from PIL import ImageGrab
+    from config import OLLAMA_VISION_MODEL
     
     # Destructive check (simple heuristic for safety)
     destructive_keywords = ['delete', 'format', 'uninstall', 'remove', 'reset', 'kill', 'drop']
@@ -29,9 +55,9 @@ def execute_visual_task(goal: str, require_confirmation: bool = False) -> str:
         return f"WARNING: The goal '{goal}' appears destructive. Please confirm with the user before proceeding, and set require_confirmation=True."
 
     max_retries = 3
-    timeout_seconds = 60
+    timeout_seconds = _env_timeout()
     start_time = time.time()
-    
+
     history_context = []
     
     for attempt in range(max_retries + 1):
@@ -42,8 +68,8 @@ def execute_visual_task(goal: str, require_confirmation: bool = False) -> str:
         
         # 1. OBSERVE
         screenshot = ImageGrab.grab()
-        # Save for HUD
-        capture_dir = os.path.join("static", "captures")
+        # Save for HUD (kept OUTSIDE the web-served static dir)
+        capture_dir = "captures"
         os.makedirs(capture_dir, exist_ok=True)
         screenshot.save(os.path.join(capture_dir, "last_screen.png"))
         
@@ -80,14 +106,14 @@ Output ONLY valid JSON in this exact schema:
 """
         try:
             res = ollama.chat(
-                model="qwen3-vl", 
+                model=OLLAMA_VISION_MODEL, 
                 messages=[{'role': 'user', 'content': prompt, 'images': [b64_str]}],
                 format="json"
             )
             plan = json.loads(res['message']['content'])
         except Exception as e:
             logging.error(f"[VISUAL_AGENT] Planning failed: {e}")
-            return f"Task failed: Error connecting to qwen3-vl or parsing JSON. {str(e)}"
+            return f"Task failed: Error connecting to {OLLAMA_VISION_MODEL} or parsing JSON. {str(e)}"
             
         logging.info(f"[VISUAL_AGENT] Plan: {plan}")
         
@@ -104,6 +130,7 @@ Output ONLY valid JSON in this exact schema:
                 import pytesseract
                 # Find text using OCR
                 data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+                img_w, img_h = screenshot.size
                 target = args.get("text", "").lower()
                 found_x, found_y = None, None
                 
@@ -116,7 +143,7 @@ Output ONLY valid JSON in this exact schema:
                         break
                         
                 # If not found as single word, check for consecutive words
-                if not found_x and " " in target:
+                if found_x is None and " " in target:
                     target_words = target.split()
                     for i in range(len(data['text']) - len(target_words) + 1):
                         match = True
@@ -134,11 +161,12 @@ Output ONLY valid JSON in this exact schema:
                             found_x = x1 + ((x2 - x1) // 2)
                             found_y = y1 + ((y2 - y1) // 2)
                             break
-                            
-                if found_x and found_y:
-                    pyautogui.moveTo(found_x, found_y, duration=0.5)
+                                
+                if found_x is not None and found_y is not None:
+                    screen_x, screen_y = _scale_to_screen(found_x, found_y, img_w, img_h)
+                    pyautogui.moveTo(screen_x, screen_y, duration=0.5)
                     pyautogui.click()
-                    action_result = f"Clicked text '{target}'"
+                    action_result = f"Clicked text '{target}' at screen ({screen_x}, {screen_y})"
                 else:
                     action_result = f"Failed to find text '{target}' on screen via OCR."
                     
