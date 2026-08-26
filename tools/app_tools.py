@@ -23,8 +23,9 @@ def open_application(app_name: str) -> str:
 
         was_running = _running()
 
-        # Popen is non-blocking so it doesn't freeze the assistant
-        subprocess.Popen(["start", app_name], shell=True)
+        # Popen is non-blocking so it doesn't freeze the assistant.
+        # "start" is a cmd builtin; the empty string is its window-title argument.
+        subprocess.Popen(["cmd", "/c", "start", "", app_name], shell=False)
 
         # Verify a process with a matching name actually appeared (max ~6s).
         # Some apps spawn via a launcher with an unrelated process name, so if

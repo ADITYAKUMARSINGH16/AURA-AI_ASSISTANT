@@ -348,6 +348,24 @@ COMMIT
 feat(chat): streaming SSE chat with live token output and tool-execution progress
 ```
 
+
+
+
+
+
+
+
+
+
+done
+
+
+
+
+
+
+
+
 ### Task 8 — Frontend realtime refactor (retire the pollers)
 Depends on: T6 (+T7 for chat status line polish)
 
@@ -396,6 +414,12 @@ refactor(ui): replace polling loops with SSE realtime channel and heartbeat-driv
 ```
 
 ---
+
+
+done
+
+
+
 
 ## Phase 3 — Stateful Planner
 
@@ -449,6 +473,12 @@ COMMIT
 feat(planner): persistent multi-step plan state with step tracking and API surface
 ```
 
+
+done
+
+
+
+
 ### Task 10 — Active Plan panel in the HUD
 Depends on: T9 (and T6 for live updates; falls back to 5s polling of /api/plans/active otherwise)
 
@@ -496,6 +526,11 @@ feat(hud): live Active Plan card with step tracking and cancel control
 ```
 
 ---
+done  
+
+
+
+
 
 ## Phase 4 — UI Consolidation & Polish
 
@@ -549,6 +584,9 @@ COMMIT
 refactor(ui): HUD becomes root experience, unify boot sequence, retire standalone reactor page
 ```
 
+
+done
+
 ### Task 12 — Design-token completion (type scale)
 Depends on: T0
 
@@ -590,6 +628,12 @@ ACCEPTANCE CRITERIA
 COMMIT
 refactor(ui): introduce --text-* type scale in tokens.css and migrate stylesheets onto tokens
 ```
+
+
+
+
+done
+
 
 ### Task 13 — Real Now Playing card (Windows SMTC)
 Depends on: T0 (nice-to-have: T6 for push updates; poll fallback required)
@@ -638,6 +682,12 @@ COMMIT
 feat(media): real Now Playing card via Windows SMTC with graceful degradation
 ```
 
+
+done
+
+
+
+
 ### Task 14 — Responsive audit & final asset pass
 Depends on: T0 (do AFTER T11–T13 so you audit the consolidated UI)
 
@@ -678,6 +728,11 @@ fix(ui): responsive audit fixes across HUD breakpoints and final asset cleanup
 ```
 
 ---
+
+
+done
+
+
 
 ## Phase 5 — UX Depth
 
@@ -724,6 +779,8 @@ ACCEPTANCE CRITERIA
 COMMIT
 refactor(voice): single server-side wake-word detector with honest status surfacing
 ```
+done
+
 
 ### Task 16 — Configurable quick actions
 Depends on: T0

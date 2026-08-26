@@ -164,6 +164,31 @@
     --z-toast: 800;
     --z-boot: 1000;
 
+    /* ── Type scale (modal values audited from style.css / landing.css) ──
+       2xs = micro labels, gauge ticks, status readouts
+       xs  = labels, chips, meta text
+       sm  = secondary UI text, buttons
+       base = body copy
+       md  = emphasized body, inputs, view titles
+       lg  = section headers, brand marks
+       xl  = large stat displays
+       2xl/3xl = reserved for large headings (not yet in use)
+       display = welcome hero headline (deliberate clamp) */
+    --text-2xs: 10px;
+    --text-xs: 11px;
+    --text-sm: 12px;
+    --text-base: 13px;
+    --text-md: 14px;
+    --text-lg: 16px;
+    --text-xl: 20px;
+    --text-2xl: 26px;
+    --text-3xl: 32px;
+    --text-display: clamp(2.75rem, 14vw, 4rem);
+
+    /* ── Line height ───────────────────────────────────────── */
+    --leading-tight: 1.2;
+    --leading-normal: 1.5;
+
     /* ── Layout ────────────────────────────────────────────── */
     --header-h: 56px;
     --sidebar-w: 216px;

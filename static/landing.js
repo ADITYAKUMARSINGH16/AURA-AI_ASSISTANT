@@ -8,70 +8,9 @@ const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').mat
 const COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
 
 // ═══════════════════════════════════════════════════════════
-// MODULE 1: CINEMATIC BOOT OVERLAY
+// MODULE 1: CINEMATIC BOOT OVERLAY (shared implementation — boot.js)
 // ═══════════════════════════════════════════════════════════
-(function bootOverlay() {
-    const overlay = document.getElementById('boot-overlay');
-    const bootLinesContainer = document.getElementById('boot-lines');
-    const bootPrompt = document.getElementById('boot-prompt');
-    const progressBar = document.getElementById('boot-progress-bar');
-
-    const lines = [
-        { text: '> AURA KERNEL v2.0.4 loading...', delay: 200 },
-        { text: '> Mounting encrypted filesystem ............... ', suffix: '<span class="bok">[OK]</span>', delay: 350 },
-        { text: '> Initializing neural mesh driver ............. ', suffix: '<span class="bok">[OK]</span>', delay: 300 },
-        { text: '> Loading Ollama inference engine ............. ', suffix: '<span class="bok">[OK]</span>', delay: 400 },
-        { text: '> Calibrating voice core (Edge TTS) .......... ', suffix: '<span class="bok">[OK]</span>', delay: 350 },
-        { text: '> Speech recognition module ................... ', suffix: '<span class="bok">[OK]</span>', delay: 250 },
-        { text: '> Tesseract OCR vision driver ................. ', suffix: '<span class="bok">[OK]</span>', delay: 300 },
-        { text: '> Scanning local network (HOME GRID) ......... ', suffix: '<span class="bwarn">[3 devices]</span>', delay: 450 },
-        { text: '> Threat assessment protocol .................. ', suffix: '<span class="bok">[CLEAR]</span>', delay: 300 },
-        { text: '> Memory archive sync ........................ ', suffix: '<span class="bok">[SYNCED]</span>', delay: 350 },
-        { text: '> Establishing secure uplink .................. ', suffix: '<span class="bok">[CONNECTED]</span>', delay: 400 },
-        { text: '> All subsystems nominal.', delay: 200 },
-        { text: '', delay: 100 },
-        { text: '  ◆ AURA ONLINE — Awaiting operator.', delay: 300, cls: 'bok' },
-    ];
-
-    let lineIndex = 0;
-
-    function renderLine() {
-        if (lineIndex >= lines.length) {
-            progressBar.style.width = '100%';
-            setTimeout(() => { bootPrompt.classList.add('visible'); }, 300);
-            return;
-        }
-
-        const l = lines[lineIndex];
-        const div = document.createElement('div');
-        div.className = 'bline';
-        div.innerHTML = l.text + (l.suffix || '');
-        if (l.cls) div.classList.add(l.cls);
-        bootLinesContainer.appendChild(div);
-
-        progressBar.style.width = ((lineIndex + 1) / lines.length * 100) + '%';
-        lineIndex++;
-        setTimeout(renderLine, l.delay);
-    }
-
-    setTimeout(renderLine, 600);
-
-    function dismiss() {
-        overlay.classList.add('dismissed');
-        setTimeout(() => { overlay.style.display = 'none'; }, 800);
-        // Show HUD overlays after boot
-        document.querySelectorAll('.hud-overlay').forEach(el => el.classList.add('visible'));
-    }
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Tab') return; // don't hijack keyboard navigation
-        dismiss();
-    }, { once: true });
-    overlay.addEventListener('click', dismiss, { once: true });
-
-    // Auto-dismiss after 7 seconds
-    setTimeout(dismiss, 7000);
-})();
+AuraBoot.run({ variant: 'full' });
 
 
 // ═══════════════════════════════════════════════════════════

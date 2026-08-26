@@ -3,7 +3,8 @@ import logging
 import threading
 import time
 import re
-from tools import get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, recall_fact, search_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, forget_fact, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, run_aura_diagnostics
+import asyncio
+from tools import get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, search_memory, forget_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, run_aura_diagnostics
 from permissions import confirm_pending_action, reject_pending_action, evaluate_permission
 from config import OLLAMA_MODEL, chat_options, OLLAMA_KEEP_ALIVE
 from memory import load_memory, save_memory
@@ -15,8 +16,15 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-available_tools = [get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, recall_fact, search_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, forget_fact, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, confirm_pending_action, reject_pending_action, run_aura_diagnostics]
+available_tools = [get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, search_memory, forget_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, confirm_pending_action, reject_pending_action, run_aura_diagnostics]
 tool_map = {tool.__name__: tool for tool in available_tools}
+
+def _summarize_args(arguments) -> str:
+    """Short human-readable argument preview for tool_start events."""
+    try:
+        return json.dumps(arguments, default=str)[:120]
+    except Exception:
+        return str(arguments)[:120]
 
 # Intent Router Mapping
 TOOL_CATEGORIES = {
@@ -26,7 +34,7 @@ TOOL_CATEGORIES = {
     "COMPUTER_CONTROL": [open_application, close_application, read_clipboard, execute_visual_task, get_active_window],
     "FILE": [list_directory, read_file, sync_archive],
     "WEB_RESEARCH": [web_search],
-    "MEMORY": [remember_fact, recall_fact, search_memory, forget_fact],
+    "MEMORY": [remember_fact, search_memory, forget_memory],
     "SMART_HOME": [discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music],
     "SECURITY": [run_threat_scan, scan_home_network, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes],
     "PLANNER": [report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal],
@@ -132,12 +140,13 @@ When asked to perform a computer task (e.g., "Open Chrome and search for X", "De
 Instead of immediately executing tools, determine whether a task requires multiple steps:
 1. **Simple Tasks** (e.g., "What is my CPU temp?"): Skip planning. Call the appropriate tool directly.
 2. **Complex Tasks** (e.g., "Prepare my laptop for gaming", "Troubleshoot network"):
-   - First, call `create_temporary_plan(steps=[...])` to register your multi-step plan.
-   - Use `report_progress("Message")` right before executing each major step so the user knows what you are doing (e.g., "Checking CPU usage...").
+   - First, call `create_temporary_plan(steps=[...], goal="short task name")` to register your multi-step plan.
+   - Execute step 1, then you MUST call `report_progress("Step 1 complete: <what was done>")` after finishing EACH step — this marks the step done in tracked plan state and reveals the next one.
    - Execute the corresponding tool for that step.
    - Verify the tool result. If it fails, retry intelligently.
+   - When the final step is done, reporting "Step N complete" auto-completes the plan; no separate close call exists.
    - Continue until the ultimate goal is achieved, then provide the final verbal response.
-   - **Never fabricate** completed actions.
+   - **Never fabricate** completed actions. Progress messages without a step number are recorded as notes on the current step instead of advancing it.
 
 **Windows System Diagnostics:**
 When the user asks about system performance, slowness, or hardware (e.g. "Why is my laptop slow?", "What is my GPU?"):
@@ -181,8 +190,10 @@ class AuraAgent:
         # re-classified dangerous forever (confirmation deadlock).
         self._pending_danger = None  # (timestamp, original_input)
         
-    def send_message(self, user_input: str, images: list = None, file_texts: list = None) -> str:
-        """Sends a message to the agent and returns its text response."""
+    def iter_chat_events(self, user_input: str, images: list = None, file_texts: list = None):
+        """THE chat pipeline. Yields typed events (meta/token/tool_start/tool_result/
+        permission_request/done); send_message() and /api/chat/stream are both thin
+        transports over this generator, so there is exactly one loop implementation."""
         task_start_time = time.time()
         self.ai_telemetry["tool_latency"] = 0.0
         self.ai_telemetry["vision_latency"] = 0.0
@@ -201,6 +212,8 @@ class AuraAgent:
         active_skill = intent.get('active_skill')
         
         logging.info(f"[SUBSYSTEM_ROUTING] Active Categories: {categories} | Plan: {requires_plan} | Dangerous: {is_dangerous} | Skill: {active_skill}")
+
+        yield {"type": "meta", "intent": {"categories": categories, "requires_plan": requires_plan}, "skill": active_skill}
 
         if is_dangerous:
             # If this input is an explicit confirmation of the request we just
@@ -223,7 +236,8 @@ class AuraAgent:
                 self.messages.append({'role': 'user', 'content': original_user_input})
                 self.messages.append({'role': 'assistant', 'content': warning})
                 save_memory(self.messages)
-                return warning
+                yield {"type": "done", "text": warning, "memory_saved": False}
+                return
             # Confirmation accepted; clear it so a later "yes" can't approve something new.
             self._pending_danger = None
 
@@ -308,26 +322,55 @@ class AuraAgent:
                 break
             
             logging.info(f"Sending request to model with {len(self.messages)} messages in context.")
+            full_content = ""
+            tool_call_acc = {}  # stream index -> {"name", "args_str", "dict_args"}
+            stats = {}
             try:
                 m_start = time.time()
-                response = ollama.chat(
+                stream = ollama.chat(
                     model=OLLAMA_MODEL,
                     messages=self.messages,
                     tools=active_tools if active_tools else None,
                     options=chat_options(),
-                    keep_alive=OLLAMA_KEEP_ALIVE
+                    keep_alive=OLLAMA_KEEP_ALIVE,
+                    stream=True
                 )
-                m_end = time.time()
-                
-                # Update model telemetry
-                self.ai_telemetry["model_latency"] = m_end - m_start
-                self.ai_telemetry["prompt_tokens"] = response.get('prompt_eval_count', 0)
-                eval_count = response.get('eval_count', 0)
+                for chunk in stream:
+                    chunk_msg = chunk.get('message', {})
+                    delta = chunk_msg.get('content') or ''
+                    if delta:
+                        full_content += delta
+                        yield {"type": "token", "text": delta}
+                    for key in ("prompt_eval_count", "eval_count", "eval_duration"):
+                        value = chunk.get(key)
+                        if value:
+                            stats[key] = value
+                    # Tool-call fragments may arrive spread across chunks; accumulate
+                    # until the stream ends, then assemble complete calls.
+                    for tc in chunk_msg.get('tool_calls') or []:
+                        fn = tc.get('function', {})
+                        idx = tc.get('index', 0)
+                        acc = tool_call_acc.setdefault(idx, {"name": "", "args_str": "", "dict_args": None})
+                        name_frag = fn.get('name')
+                        if name_frag:
+                            acc["name"] += name_frag
+                        args_frag = fn.get('arguments')
+                        if isinstance(args_frag, dict):
+                            merged = acc["dict_args"] or {}
+                            merged.update(args_frag)
+                            acc["dict_args"] = merged
+                        elif isinstance(args_frag, str):
+                            acc["args_str"] += args_frag
+                self.ai_telemetry["model_latency"] = time.time() - m_start
+
+                # Update model telemetry (final counts arrive on the last chunks)
+                self.ai_telemetry["prompt_tokens"] = stats.get("prompt_eval_count", 0)
+                eval_count = stats.get("eval_count", 0)
                 self.ai_telemetry["response_tokens"] = eval_count
-                eval_dur_ns = response.get('eval_duration', 0)
+                eval_dur_ns = stats.get("eval_duration", 0)
                 if eval_dur_ns > 0:
                     self.ai_telemetry["tokens_per_sec"] = eval_count / (eval_dur_ns / 1e9)
-                
+
             except Exception as e:
                 logging.error(f"Error calling Ollama API: {e}")
                 msg_dict = {
@@ -336,17 +379,29 @@ class AuraAgent:
                 }
                 self.messages.append(msg_dict)
                 break
-            
-            message = response['message']
-            
-            # Convert Ollama Message object to a native dictionary for JSON serialization
+
+            tool_calls = []
+            for idx in sorted(tool_call_acc):
+                acc = tool_call_acc[idx]
+                raw_args = acc["dict_args"]
+                if raw_args is None:
+                    raw = (acc["args_str"] or "").strip()
+                    try:
+                        raw_args = json.loads(raw) if raw else {}
+                    except json.JSONDecodeError:
+                        logging.warning(f"Tool call '{acc['name']}' had unparseable streamed arguments; using empty args.")
+                        raw_args = {}
+                if not acc["name"]:
+                    continue
+                tool_calls.append({"function": {"name": acc["name"], "arguments": raw_args}})
+
             msg_dict = {
-                'role': message.get('role', 'assistant'),
-                'content': message.get('content') or ''
+                'role': 'assistant',
+                'content': full_content
             }
-            
+
             # If the model completely blanks out and calls no tools, retry without tools
-            if not msg_dict.get('content') and not message.get('tool_calls'):
+            if not msg_dict.get('content') and not tool_calls:
                 logging.warning("Model returned empty response with no tools. Retrying without tools to prevent silence.")
                 try:
                     retry_response = ollama.chat(
@@ -356,23 +411,18 @@ class AuraAgent:
                         keep_alive=OLLAMA_KEEP_ALIVE
                         # Intentionally omitting tools=available_tools
                     )
-                    message = retry_response['message']
-                    msg_dict = {
-                        'role': message.get('role', 'assistant'),
-                        'content': message.get('content') or ''
-                    }
+                    retry_message = retry_response['message']
+                    msg_dict['content'] = retry_message.get('content') or ''
+                    # The blocking transport only sees done.text, but stream
+                    # clients should see the retried answer as tokens too.
+                    if msg_dict['content']:
+                        yield {"type": "token", "text": msg_dict['content']}
                 except Exception as e:
                     logging.error(f"Error on retry: {e}")
-            if message.get('tool_calls'):
-                msg_dict['tool_calls'] = [
-                    {
-                        'function': {
-                            'name': tc.function.name if hasattr(tc, 'function') else tc['function']['name'],
-                            'arguments': tc.function.arguments if hasattr(tc, 'function') else tc['function']['arguments']
-                        }
-                    } for tc in message.get('tool_calls')
-                ]
-            
+
+            if tool_calls:
+                msg_dict['tool_calls'] = tool_calls
+
             self.messages.append(msg_dict)
             
             if not msg_dict.get('tool_calls'):
@@ -386,13 +436,15 @@ class AuraAgent:
                 tool_name = tool_call['function']['name']
                 arguments = tool_call['function']['arguments']
                 logging.info(f"Executing tool '{tool_name}' with args: {arguments}")
-                
+
                 if tool_name in tool_map:
                     try:
                         # Check permissions
                         status = evaluate_permission(tool_name, arguments)
-                        
+
                         if status == "APPROVED":
+                            yield {"type": "tool_start", "tool": tool_name,
+                                   "args_summary": _summarize_args(arguments)}
                             # Call the python function
                             t_start = time.time()
                             result = str(tool_map[tool_name](**arguments))
@@ -400,10 +452,15 @@ class AuraAgent:
                             # Optional truncation for extremely large text (like screen reading)
                             if len(result) > 4000:
                                 result = result[:4000] + "\n...[TRUNCATED FOR LENGTH]..."
+                            yield {"type": "tool_result", "tool": tool_name, "ok": True,
+                                   "preview": result[:200]}
                         else:
                             # It's an action ID, meaning PENDING
+                            from permissions import get_risk_level
+                            yield {"type": "permission_request", "action_id": status,
+                                   "tool": tool_name, "risk": get_risk_level(tool_name).name}
                             result = f"Tool '{tool_name}' blocked. Requires explicit user confirmation. Action ID: {status}. Tell the user you need authorization to proceed. They can click AUTHORIZE in the HUD, or simply reply 'Yes' in chat."
-                            
+
                         logging.info(f"Tool '{tool_name}' succeeded. Result length: {len(result)}")
                         self.messages.append({
                             'role': 'tool',
@@ -412,6 +469,8 @@ class AuraAgent:
                         })
                     except Exception as e:
                         logging.error(f"Tool '{tool_name}' failed with error: {e}")
+                        yield {"type": "tool_result", "tool": tool_name, "ok": False,
+                               "preview": str(e)[:200]}
                         self.messages.append({
                             'role': 'tool',
                             'name': tool_name,
@@ -449,14 +508,54 @@ class AuraAgent:
                 final_content = "I have processed your request but generated no verbal response."
                 
         logging.info(f"Returning final content to user (Length: {len(final_content)})")
-        
+
+        memory_saved = False
         if final_content and (len(original_user_input) + len(final_content)) > 80:
             # Skip the background memory-extraction LLM call for trivial
             # exchanges ("hi"/"thanks") - on 4 GB VRAM every extra generation
             # competes with the user's next request.
             threading.Thread(target=extract_and_store_memory, args=(original_user_input, final_content), daemon=True).start()
-            
-        return final_content
+            memory_saved = True
+
+        yield {"type": "done", "text": final_content, "memory_saved": memory_saved}
+
+    def send_message(self, user_input: str, images: list = None, file_texts: list = None) -> str:
+        """Blocking transport over iter_chat_events; returns only the final text."""
+        final_text = ""
+        for event in self.iter_chat_events(user_input, images=images, file_texts=file_texts):
+            if event.get("type") == "done":
+                final_text = event.get("text", "")
+            elif event.get("type") == "error":
+                raise RuntimeError(event.get("message", "chat pipeline error"))
+        return final_text
+
+    async def chat_stream(self, user_input: str, images: list = None, file_texts: list = None):
+        """Async-generator transport over iter_chat_events for SSE clients.
+
+        The pipeline itself is blocking (ollama client, tool functions), so it is
+        pumped from a worker thread into an asyncio queue; the API event loop
+        stays free to serve other requests while generation runs.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        _END = object()
+
+        def _pump():
+            try:
+                for event in self.iter_chat_events(user_input, images=images, file_texts=file_texts):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception as e:
+                logging.error(f"chat_stream pipeline error: {e}")
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(e)})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, _END)
+
+        threading.Thread(target=_pump, daemon=True).start()
+        while True:
+            item = await queue.get()
+            if item is _END:
+                break
+            yield item
         
 def create_agent():
     return AuraAgent()

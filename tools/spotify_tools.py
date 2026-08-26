@@ -1,7 +1,13 @@
 import webbrowser
 import urllib.parse
 import time
-import pyautogui
+
+try:
+    import pyautogui
+    PYAUTOGUI_AVAILABLE = True
+except ImportError:
+    pyautogui = None
+    PYAUTOGUI_AVAILABLE = False
 
 def search_spotify(query: str) -> str:
     """
@@ -10,6 +16,8 @@ def search_spotify(query: str) -> str:
     :param query: The name of the song, artist, or playlist.
     """
     try:
+        if not PYAUTOGUI_AVAILABLE:
+            return "Spotify control unavailable: pyautogui is not installed."
         safe_query = urllib.parse.quote(query)
         # Using the spotify: URI scheme will open the desktop app directly to the search page.
         webbrowser.open(f"spotify:search:{safe_query}")
@@ -44,6 +52,8 @@ def play_spotify_music() -> str:
     Use this to pause or resume music.
     """
     try:
+        if not PYAUTOGUI_AVAILABLE:
+            return "Spotify control unavailable: pyautogui is not installed."
         pyautogui.press('playpause')
         return "Toggled media playback."
     except Exception as e:

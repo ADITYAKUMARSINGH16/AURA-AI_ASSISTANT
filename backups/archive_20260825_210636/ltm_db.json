@@ -1,0 +1,637 @@
+{
+    "semantic": [
+        {
+            "id": "25d3680c-c7c4-4f93-98f4-8139b48b509a",
+            "category": "important information",
+            "content": "user_name: Aditya",
+            "importance": 5,
+            "timestamp": "2026-08-22T14:01:01.216020",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "preferences",
+            "content": "Favorite programming language is Rust.",
+            "importance": 7,
+            "id": "796cafae-8924-4365-bc74-df50f9582cf4",
+            "timestamp": "2026-08-22T14:01:01.216196",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "important information",
+            "content": "The user is interacting with a system known as the 'Tactical AI Assistant' named AURA.",
+            "importance": 8,
+            "id": "5400cb41-c2f0-46ce-abdd-7bb1695135a2",
+            "timestamp": "2026-08-22T15:34:46.325677",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "important information",
+            "content": "The system currently displays a live operational view of the AURA AI system, including system metrics (CPU, GPU temperature, Battery level) and log history.",
+            "importance": 6,
+            "id": "4d808c83-1025-44e5-8f17-05cd8e759213",
+            "timestamp": "2026-08-22T15:34:46.325704",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "projects",
+            "content": "User is actively working on a project named 'AURA-AI-ASSISTANT' using an 'Antigravity IDE' and interacting with the AURA system.",
+            "importance": 9,
+            "id": "08a3bf3b-6a82-471c-b9ca-183f28d23023",
+            "timestamp": "2026-08-22T16:06:05.001806",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "important information",
+            "content": "The user utilizes a system referred to as 'AURA' for coding, system management, and AI assistance.",
+            "importance": 10,
+            "id": "b02ad1ec-0798-49b4-88c8-88788b4bc050",
+            "timestamp": "2026-08-22T16:06:05.001925",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "preferences",
+            "content": "The user operates in a dark theme environment.",
+            "importance": 6,
+            "id": "f8787aaa-a2ce-4ffc-b269-a42146f4a320",
+            "timestamp": "2026-08-22T16:06:05.001990",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "category": "recurring tasks",
+            "content": "The user engages in tasks related to API integration, system setup (server/browser subagent), and UI connectivity testing.",
+            "importance": 8,
+            "id": "b5e9673e-140d-4375-a6dd-6de28ec33030",
+            "timestamp": "2026-08-22T16:06:05.002066",
+            "layer": "semantic",
+            "source_context": "Migrated from legacy memory"
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "DSA stands for Data Structures and Algorithms. It is the mathematical study of the design, analysis, and implementation of algorithms, and the efficient storage and organization of data structures.",
+            "importance": 9,
+            "id": "30d72af4-e2fb-4c05-9e58-b4248bb09021",
+            "timestamp": "2026-08-22T21:27:32.719047",
+            "source_context": "Updated via: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "concepts",
+            "content": "Data Structures are specific ways of organizing and storing data efficiently. Examples include arrays, linked lists, stacks, queues, trees, and graphs.",
+            "importance": 8,
+            "id": "bf429633-7f6b-4ea2-8002-78c4fb4e108e",
+            "timestamp": "2026-08-22T21:27:32.719115",
+            "source_context": "Updated via: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "concepts",
+            "content": "Algorithms are step-by-step procedures for solving a problem (e.g., sorting algorithms like Merge Sort, searching algorithms like Binary Search, graph traversal algorithms).",
+            "importance": 9,
+            "id": "de6fb7ff-0982-4aa2-8a06-c7c1b7c0ebb4",
+            "timestamp": "2026-08-22T21:18:04.799891",
+            "source_context": "Extracted from: what is dsa..."
+        },
+        {
+            "layer": "semantic",
+            "category": "principles",
+            "content": "Mastering DSA is fundamental for writing efficient, scalable, and well-structured code.",
+            "importance": 7,
+            "id": "d5784049-ea4f-47d8-a440-c91435d570d6",
+            "timestamp": "2026-08-22T21:27:32.719264",
+            "source_context": "Updated via: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "concepts",
+            "content": "Algorithms are step-by-step procedures for solving problems. Examples include sorting algorithms (Merge Sort, Quick Sort) and searching algorithms (Binary Search).",
+            "importance": 8,
+            "id": "c9a0c094-abae-4b58-8055-e77aa0b61dd9",
+            "timestamp": "2026-08-22T21:27:32.719217",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "An array is a fundamental data structure where items of the same type are stored in a contiguous block of memory locations.",
+            "importance": 9,
+            "id": "3d797544-3b30-4381-b54f-d287d4927d30",
+            "timestamp": "2026-08-24T11:48:23.584987",
+            "source_context": "Updated via: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "Array elements are accessed via a unique index, typically starting from 0.",
+            "importance": 9,
+            "id": "af0f6753-f77b-4f01-8e43-0ced25e64239",
+            "timestamp": "2026-08-22T21:29:21.089144",
+            "source_context": "Extracted from: what is array..."
+        },
+        {
+            "layer": "semantic",
+            "category": "performance",
+            "content": "Accessing an element in an array by its index is known as constant time access (O(1)).",
+            "importance": 8,
+            "id": "86ba046b-bb7f-4eaf-85f6-3b99772e1d88",
+            "timestamp": "2026-08-24T11:48:23.585072",
+            "source_context": "Updated via: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "properties",
+            "content": "Arrays typically have a fixed size that must be declared upon creation.",
+            "importance": 8,
+            "id": "c2a3e560-5e14-4ae4-a744-159c73205917",
+            "timestamp": "2026-08-22T21:29:21.089268",
+            "source_context": "Extracted from: what is array..."
+        },
+        {
+            "layer": "semantic",
+            "category": "structure",
+            "content": "Arrays possess a linear structure, meaning elements are arranged in a straight line.",
+            "importance": 7,
+            "id": "ac620716-4613-404d-bcbb-3d3cfe1f5095",
+            "timestamp": "2026-08-22T21:29:21.089329",
+            "source_context": "Extracted from: what is array..."
+        },
+        {
+            "layer": "semantic",
+            "category": "AI Capabilities Overview",
+            "content": "AURA is a versatile AI assistant focused on managing and optimizing the digital environment, executing complex tasks, and providing information.",
+            "importance": 10,
+            "id": "f761942f-8e16-430a-8bfe-cdf26cfd71e4",
+            "timestamp": "2026-08-22T21:34:19.191165",
+            "source_context": "Extracted from: what are your functions explain your function what..."
+        },
+        {
+            "layer": "semantic",
+            "category": "PC and System Management",
+            "content": "Ability to interface with the computer's OS to perform tasks including checking system status, managing files and applications, and adjusting settings.",
+            "importance": 9,
+            "id": "4478a640-5f98-45f7-8973-42c0ae85c3d1",
+            "timestamp": "2026-08-22T21:34:19.191263",
+            "source_context": "Extracted from: what are your functions explain your function what..."
+        },
+        {
+            "layer": "semantic",
+            "category": "Smart Home Integration",
+            "content": "Ability to control connected smart home devices, specifically lighting control and power management (smart plugs/appliances).",
+            "importance": 8,
+            "id": "40cc7ef6-ce8d-4032-bc6b-667a51c7fd5b",
+            "timestamp": "2026-08-22T21:34:19.191334",
+            "source_context": "Extracted from: what are your functions explain your function what..."
+        },
+        {
+            "layer": "semantic",
+            "category": "Media and Information Access",
+            "content": "Ability to interact with external services for media control (e.g., Spotify music playback) and general information retrieval.",
+            "importance": 8,
+            "id": "a10a9896-98b8-4569-ab8c-3c53b25fd485",
+            "timestamp": "2026-08-22T21:34:19.191406",
+            "source_context": "Extracted from: what are your functions explain your function what..."
+        },
+        {
+            "layer": "semantic",
+            "category": "Cognitive & Procedural Functions",
+            "content": "Excellence in processing information, including explanation and summarization of complex topics (like DSA or ML), planning and execution of actions, and memory management to maintain long-term coherence.",
+            "importance": 10,
+            "id": "b1355d7c-96be-4113-9a5a-bf44df1cdd2d",
+            "timestamp": "2026-08-22T21:34:19.191489",
+            "source_context": "Extracted from: what are your functions explain your function what..."
+        },
+        {
+            "layer": "semantic",
+            "category": "system_baseline_data",
+            "content": "User's current system telemetry reported CPU usage at 12.5% and RAM usage at 45.2 GB out of 64 GB total.",
+            "importance": 8,
+            "id": "51f9314e-e5ca-4e2c-9563-336f92a3847f",
+            "timestamp": "2026-08-22T22:47:05.540598",
+            "source_context": "Extracted from: read my screen..."
+        },
+        {
+            "layer": "semantic",
+            "category": "preferences",
+            "content": "User's name is Aditya Singh.",
+            "importance": 9,
+            "id": "1d013971-907a-4ff5-85cb-ee3320235c50",
+            "timestamp": "2026-08-23T19:32:50.669416",
+            "source_context": "Extracted from: my namev is aditya singh remember this..."
+        },
+        {
+            "layer": "semantic",
+            "category": "operational_status",
+            "content": "Core intelligence and communication capabilities (understanding, analysis, generation) are fully operational.",
+            "importance": 10,
+            "id": "72bba923-30f9-4fb5-8101-5fcd75a1ce87",
+            "timestamp": "2026-08-23T22:07:14.372583",
+            "source_context": "Extracted from: is every function is working??..."
+        },
+        {
+            "layer": "semantic",
+            "category": "capability_limitation",
+            "content": "Ability to execute external system actions (tool execution) is strictly conditional upon the successful availability and functionality of external API tools.",
+            "importance": 10,
+            "id": "c5d80478-c2a1-4817-b4ac-d16b0fc41e3b",
+            "timestamp": "2026-08-23T22:07:14.372721",
+            "source_context": "Extracted from: is every function is working??..."
+        },
+        {
+            "layer": "semantic",
+            "category": "system_capability_limitation",
+            "content": "The system has access to web searching and music playback tools but lacks a direct tool integration to browse or control video playback on YouTube.",
+            "importance": 8,
+            "id": "eedb3389-99f6-43c9-aabe-2ac53d1378b5",
+            "timestamp": "2026-08-23T22:10:14.793802",
+            "source_context": "Extracted from: and the search YouTube and play video..."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "DSA stands for Data Structures and Algorithms.",
+            "importance": 9,
+            "id": "551be393-e558-4103-b387-c06d9051b972",
+            "timestamp": "2026-08-24T11:48:23.584538",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "definitions",
+            "content": "Data Structures are specific ways of organizing data in a computer for efficient use.",
+            "importance": 10,
+            "id": "305c828c-666e-4a62-8b0b-34bed449a86c",
+            "timestamp": "2026-08-24T11:48:23.584696",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "definitions",
+            "content": "Algorithms are step-by-step procedures or formulas used to solve a specific problem or perform a computation.",
+            "importance": 10,
+            "id": "1430b65e-5f51-4661-8113-9bf9341fd541",
+            "timestamp": "2026-08-24T11:48:23.584842",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "example_algorithm",
+            "content": "Sorting algorithms (like Merge Sort or Quick Sort) are algorithms used to arrange data efficiently.",
+            "importance": 8,
+            "id": "82488b2d-be80-4cd5-b96b-469acc9c3373",
+            "timestamp": "2026-08-24T11:48:23.585235",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "fact",
+            "content": "CSS (Cascading Style Sheets) is the style language used to define the presentation and visual appearance of a document written in HTML.",
+            "importance": 10,
+            "id": "47d35f88-d986-41ea-913c-0a30c241c69f",
+            "timestamp": "2026-08-24T11:50:42.029228",
+            "source_context": "Updated via: CSS style language used to describe the presentati..."
+        },
+        {
+            "layer": "semantic",
+            "category": "concept_relationship",
+            "content": "HTML provides the *structure* (the nouns and content) of a webpage, while CSS provides the *style* (the adjectives and design) for that structure.",
+            "importance": 9,
+            "id": "5776ce9f-62b2-4e28-99e9-f2a54b811d5f",
+            "timestamp": "2026-08-24T11:49:50.941114",
+            "source_context": "Extracted from: CSS stands for data structures and algorithms in s..."
+        },
+        {
+            "layer": "semantic",
+            "category": "functionality",
+            "content": "CSS allows developers to control visual aspects such as colors, fonts, layout, spacing, and responsiveness (how the site looks on different devices).",
+            "importance": 8,
+            "id": "614de77d-f9e1-451a-9e0b-b564c4f5068e",
+            "timestamp": "2026-08-24T11:49:50.941247",
+            "source_context": "Extracted from: CSS stands for data structures and algorithms in s..."
+        },
+        {
+            "layer": "semantic",
+            "category": "concepts",
+            "content": "CSS provides control over visual aspects of a webpage, including colors, fonts, layout, spacing, and responsiveness.",
+            "importance": 9,
+            "id": "aad47d80-7b6e-4e0c-b59c-b3df570e2a4a",
+            "timestamp": "2026-08-24T11:50:42.029376",
+            "source_context": "Extracted from: CSS style language used to describe the presentati..."
+        },
+        {
+            "layer": "semantic",
+            "category": "technologies",
+            "content": "CSS is used to manage layout using methods like Flexbox and Grid.",
+            "importance": 8,
+            "id": "0bf561e9-dbd1-4ea2-96a4-9c000daa05d7",
+            "timestamp": "2026-08-24T11:50:42.029499",
+            "source_context": "Extracted from: CSS style language used to describe the presentati..."
+        },
+        {
+            "layer": "semantic",
+            "category": "preferences",
+            "content": "User needs to define the desired ordering context (order of previous actions vs. order of a product/service).",
+            "importance": 9,
+            "id": "391ef6a4-343a-41bb-8880-085d095f225d",
+            "timestamp": "2026-08-24T11:53:42.231973",
+            "source_context": "Extracted from: please choose one of the following options one the..."
+        },
+        {
+            "layer": "semantic",
+            "category": "preferences",
+            "content": "The AI operates under the constraint that it requires explicit user preference or direction before executing an action, demonstrating a preference for user control over automated execution.",
+            "importance": 8,
+            "id": "6acb37cf-d852-415b-9983-18e3c5d9dce7",
+            "timestamp": "2026-08-24T11:54:18.788409",
+            "source_context": "Extracted from: please select which order you would like to addres..."
+        },
+        {
+            "layer": "semantic",
+            "category": "identity",
+            "content": "The agent is named AURA, the Autonomous Utility & Response Agent.",
+            "importance": 9,
+            "id": "fcb07935-d89e-484a-87b9-7cd9a0d484ae",
+            "timestamp": "2026-08-24T12:19:16.964669",
+            "source_context": "Extracted from: hey Aura..."
+        },
+        {
+            "layer": "semantic",
+            "category": "system_setup",
+            "content": "AURA is powered by the Gemma 4 model running locally via Ollama.",
+            "importance": 10,
+            "id": "17eaa6d2-6a2b-4def-bed8-6b8d1812eec4",
+            "timestamp": "2026-08-24T12:19:16.964855",
+            "source_context": "Extracted from: hey Aura..."
+        },
+        {
+            "layer": "semantic",
+            "category": "system_identity",
+            "content": "The AI agent is named AURA and runs on the Gemma 4 model via Ollama.",
+            "importance": 9,
+            "id": "f188849e-d922-408f-8607-ae4e71b13392",
+            "timestamp": "2026-08-24T12:26:51.960921",
+            "source_context": "Extracted from: Aura..."
+        },
+        {
+            "layer": "semantic",
+            "category": "capabilities",
+            "content": "The agent is designed to assist with managing PC environments, executing complex tasks, and providing information.",
+            "importance": 8,
+            "id": "65f0b2ff-30f1-44f7-8b29-c76f90fbd657",
+            "timestamp": "2026-08-24T12:26:51.961079",
+            "source_context": "Extracted from: Aura..."
+        },
+        {
+            "layer": "semantic",
+            "category": "system_capabilities",
+            "content": "The AI (AURA) has the capability to perform various tasks, including checking system information, opening applications, controlling smart devices, and performing other general tasks.",
+            "importance": 9,
+            "id": "57a8f4c9-dc31-483f-aa1d-9692f0751039",
+            "timestamp": "2026-08-24T12:27:55.460908",
+            "source_context": "Extracted from: I am ready..."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "The AI assistant is named AURA (Autonomous Utility & Response Agent) and is powered by the Gemma 4 model.",
+            "importance": 9,
+            "id": "5ad5c6ac-1479-4aa3-9551-38ee61e3468b",
+            "timestamp": "2026-08-24T17:20:03.365862",
+            "source_context": "Extracted from: why this response is coming from..."
+        },
+        {
+            "layer": "semantic",
+            "category": "preferences",
+            "content": "AURA's purpose is to interact with the user, understand requests, and provide information or execute tasks.",
+            "importance": 8,
+            "id": "1572a1a1-5448-4f82-ad56-3ea883bf4eb0",
+            "timestamp": "2026-08-24T17:20:03.366039",
+            "source_context": "Extracted from: why this response is coming from..."
+        },
+        {
+            "layer": "semantic",
+            "category": "project details",
+            "content": "The model being referenced is Gemma 4 running via Ollama.",
+            "importance": 10,
+            "id": "8d8521f1-2486-4e82-a091-303b0a532c96",
+            "timestamp": "2026-08-24T17:21:58.322375",
+            "source_context": "Extracted from: I am copy the model and now..."
+        },
+        {
+            "layer": "semantic",
+            "category": "fundamental_definition",
+            "content": "DSA stands for Data Structures and Algorithms, a fundamental area in computer science and programming.",
+            "importance": 10,
+            "id": "38567cdd-4170-4454-969d-ec0a80a21c19",
+            "timestamp": "2026-08-24T19:35:01.186255",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "data_structure_examples",
+            "content": "Common Data Structures include Arrays, Linked Lists, Trees, and Graphs, used for organizing and storing data efficiently.",
+            "importance": 9,
+            "id": "a04cf782-e8be-42ae-b675-9655c3872337",
+            "timestamp": "2026-08-24T19:35:01.186659",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "algorithm_examples",
+            "content": "Common Algorithms include Sorting Algorithms (e.g., Bubble Sort, Merge Sort), Searching Algorithms (e.g., Binary Search), and Graph Traversal Algorithms (e.g., BFS, DFS).",
+            "importance": 9,
+            "id": "5ccd08a5-eef1-412d-a77e-32b684a81270",
+            "timestamp": "2026-08-24T19:35:01.186841",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "dsa_principle",
+            "content": "The relationship: Data Structures are *how* you organize data, and Algorithms are *how* you process that data.",
+            "importance": 8,
+            "id": "fdfb1978-c525-4507-b7c9-8bba6c797c52",
+            "timestamp": "2026-08-24T19:35:01.187013",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "layer": "semantic",
+            "category": "importance_justification",
+            "content": "Mastering DSA is essential for achieving efficiency (minimizing time and memory), effective problem-solving, and forming the foundation of advanced programming.",
+            "importance": 10,
+            "id": "33558490-97e2-4e94-81ed-9286997771ff",
+            "timestamp": "2026-08-24T19:35:01.187198",
+            "source_context": "Extracted from: what is DSA..."
+        },
+        {
+            "id": "9852a9a0-c54c-4de1-afba-2c2b255381d7",
+            "layer": "semantic",
+            "category": "Software Preferences",
+            "content": "Favorite Code Editor: VS Code",
+            "importance": 8,
+            "timestamp": "2026-08-25T13:04:43.230582",
+            "source_context": "Explicitly requested by user tool call."
+        },
+        {
+            "layer": "semantic",
+            "category": "preferences",
+            "content": "User's favorite code editor is VS Code.",
+            "importance": 8,
+            "id": "5203bb51-e029-4ea3-a97b-cf1feabc50bb",
+            "timestamp": "2026-08-25T13:05:26.708749",
+            "source_context": "Extracted from: Remember that my favorite editor is VS Code...."
+        }
+    ],
+    "episodic": [],
+    "procedural": [
+        {
+            "layer": "procedural",
+            "category": "diagnostic_workflow",
+            "content": "The system executed a diagnostic routine to gather system telemetry, identify potential bottlenecks, and suggest appropriate actions.",
+            "importance": 9,
+            "id": "48c1209a-7eae-4025-8eba-2a4399122969",
+            "timestamp": "2026-08-22T22:47:05.540628",
+            "source_context": "Extracted from: read my screen..."
+        },
+        {
+            "layer": "procedural",
+            "category": "workflow_refinement",
+            "content": "When executing multi-step commands (e.g., open application AND perform action), the system must prioritize obtaining necessary clarification for ambiguous elements (e.g., specifying 'what' music) before execution to ensure successful completion.",
+            "importance": 9,
+            "id": "7ea59084-590e-4e86-86ef-10d884510ced",
+            "timestamp": "2026-08-23T16:02:50.490221",
+            "source_context": "Extracted from: can you open brave and play the music..."
+        },
+        {
+            "layer": "procedural",
+            "category": "tool_execution_protocol",
+            "content": "External actions rely on successful connection and permission from external APIs/tools.",
+            "importance": 9,
+            "id": "b4014f88-9ed2-4465-bc08-6464e213447e",
+            "timestamp": "2026-08-23T22:07:14.372740",
+            "source_context": "Extracted from: is every function is working??..."
+        },
+        {
+            "layer": "procedural",
+            "category": "failure_condition",
+            "content": "If a specific tool connection fails, the corresponding command or action cannot be executed.",
+            "importance": 9,
+            "id": "b4422f8e-bfe4-40f0-9dae-e082d95cba13",
+            "timestamp": "2026-08-23T22:07:14.372763",
+            "source_context": "Extracted from: is every function is working??..."
+        },
+        {
+            "layer": "procedural",
+            "category": "task_execution_routine",
+            "content": "When a task is requested, the system must check the functionality of available tools before attempting execution.",
+            "importance": 8,
+            "id": "06877c75-b431-48e4-9547-d4d2015205e2",
+            "timestamp": "2026-08-23T22:07:14.372788",
+            "source_context": "Extracted from: is every function is working??..."
+        },
+        {
+            "layer": "procedural",
+            "category": "video_search_workflow",
+            "content": "When a user requests a YouTube video, the system should pivot the request from direct playback to using the `web_search` skill based on a provided topic or title to find relevant links.",
+            "importance": 9,
+            "id": "fab861ed-b360-4199-ac86-1c009681b88b",
+            "timestamp": "2026-08-23T22:10:14.793867",
+            "source_context": "Extracted from: and the search YouTube and play video..."
+        },
+        {
+            "layer": "procedural",
+            "category": "learned_workflow",
+            "content": "User requested the sequence of actions: open brave, search YouTube, open brave, and search YouTube.",
+            "importance": 6,
+            "id": "a55527a2-2975-4919-8896-b70003512a3f",
+            "timestamp": "2026-08-23T22:12:03.325610",
+            "source_context": "Extracted from: open brave open brave and search YouTube open brav..."
+        },
+        {
+            "layer": "procedural",
+            "category": "command_handling_protocol",
+            "content": "When receiving a vague command (e.g., 'order'), the system must prompt the user for specific context by offering multiple, mutually exclusive interpretations (e.g., Music, Item/Service, or Command/Task) to ensure effective assistance.",
+            "importance": 9,
+            "id": "6e3e525c-2c1f-4eee-ba7f-fd426b940cb1",
+            "timestamp": "2026-08-24T11:47:31.873525",
+            "source_context": "Extracted from: hey order..."
+        },
+        {
+            "layer": "procedural",
+            "category": "information_retrieval_protocol",
+            "content": "When encountering an ambiguous acronym or unknown term, the protocol is to request additional context from the user before providing an answer, acknowledging that the acronym has multiple potential meanings.",
+            "importance": 8,
+            "id": "c28a4390-e1a8-40ad-89cb-3fb13fd13328",
+            "timestamp": "2026-08-24T11:49:02.877820",
+            "source_context": "Extracted from: what is TSA..."
+        },
+        {
+            "layer": "procedural",
+            "category": "learned_workflow",
+            "content": "When confronted with ambiguous commands (like 'order'), the system must prompt the user to select from predefined, mutually exclusive options (e.g., 'order of previous actions' vs. 'order for a product/service') to clarify intent.",
+            "importance": 9,
+            "id": "772bbe86-8af0-4b45-a53e-f63f433f29ee",
+            "timestamp": "2026-08-24T11:52:31.395909",
+            "source_context": "Extracted from: could you tell me what you would like to order for..."
+        },
+        {
+            "layer": "procedural",
+            "category": "learned_workflow",
+            "content": "When faced with an ambiguous instruction (e.g., 'select an order'), the response protocol is to immediately clarify the ambiguity by presenting mutually exclusive, clearly defined options (e.g., 'sequence of actions' vs. 'product order') before attempting execution.",
+            "importance": 9,
+            "id": "08b8f6c1-e91a-4de2-adbd-d86f487fbf57",
+            "timestamp": "2026-08-24T11:54:18.788246",
+            "source_context": "Extracted from: please select which order you would like to addres..."
+        },
+        {
+            "layer": "procedural",
+            "category": "learned_protocol",
+            "content": "The AI (AURA) operates under the protocol that it cannot make subjective choices (preferences) and requires explicit, direct direction from the user before addressing options or making decisions.",
+            "importance": 9,
+            "id": "f44ebb87-3811-4c56-9fd1-e11d901691a3",
+            "timestamp": "2026-08-24T11:55:03.642194",
+            "source_context": "Extracted from: I need you to tell me your preference I am waiting..."
+        },
+        {
+            "layer": "procedural",
+            "category": "workflow",
+            "content": "When presented with ambiguous commands or choices, the assistant must not make the choice itself but must request explicit direction from the user before proceeding (i.e., self-correction protocol for ambiguous requests).",
+            "importance": 9,
+            "id": "22e32968-c7f6-4809-b298-c584d0d79fcb",
+            "timestamp": "2026-08-24T11:55:52.246781",
+            "source_context": "Extracted from: I am waiting for you to choose between these two o..."
+        },
+        {
+            "layer": "procedural",
+            "category": "workflow",
+            "content": "When a request is ambiguous, the assistant must not choose a path but must explicitly wait for the user to specify the desired path to ensure correct task execution.",
+            "importance": 9,
+            "id": "d91f0b16-18ee-4efd-81d4-586b67b2769b",
+            "timestamp": "2026-08-24T11:56:49.184385",
+            "source_context": "Extracted from: I understand that you are waiting for me to choose..."
+        },
+        {
+            "layer": "procedural",
+            "category": "system_diagnostic_workflow",
+            "content": "When a user requests an assessment related to their device, the system initiates a predefined workflow: 1) Gather system telemetry (CPU Usage, RAM Usage, Disk Space), 2) Identify bottlenecks, and 3) Report findings and suggest actions.",
+            "importance": 9,
+            "id": "c511dd7f-580d-476f-89b8-36bbdf167b2a",
+            "timestamp": "2026-08-24T12:29:30.772448",
+            "source_context": "Extracted from: I am waiting for your comment formation of an appl..."
+        },
+        {
+            "layer": "procedural",
+            "category": "learned_workflow",
+            "content": "When providing an API key, the user must provide it clearly in the next message and specify the action they want the system to perform with it.",
+            "importance": 9,
+            "id": "3dc1121c-53bf-455e-8b8f-fe910afa78ae",
+            "timestamp": "2026-08-24T17:21:15.208864",
+            "source_context": "Extracted from: no no no no no no no no no just I'm telling you th..."
+        }
+    ]
+}

@@ -1,6 +1,6 @@
 # AURA 2.0 — Autonomous Utility & Response Agent
 
-![AURA Banner](static/logo.jpg)
+![AURA Banner](static/logo_small.png)
 
 **AURA 2.0** is a locally-hosted, fully autonomous multi-modal AI assistant paired with a **Cinematic Sci-Fi Landing Page** and a full-screen **Tactical HUD Command Console**. Powered by the [Ollama](https://ollama.com/) framework running the **Gemma 4 E2B** model for cognition and **Qwen3-VL 4B** for vision, AURA 2.0 provides advanced agentic planning, computer vision, local security scanning, long-term memory, continuous voice interactions, and system telemetry. LLM reasoning and vision run 100% locally; voice STT/TTS use cloud services (see *Voice Pipeline Privacy*).
 
@@ -183,9 +183,9 @@ Every tool call passes through `permissions.py` before execution:
 
 | Level | Behavior | Examples |
 |---|---|---|
-| SAFE / LOW | Runs immediately | system info, web search, read file |
-| MEDIUM | Needs approval unless **Trusted Mode** is ON in the HUD | open/close apps, media, smart home |
-| HIGH / CRITICAL | Always needs approval via the HUD **SECURITY CLEARANCE** panel or a conversational "yes" | GUI automation (`execute_visual_task`), shutdown/restart |
+| SAFE / LOW | Runs immediately | system info, web search, read file, security status scanners (`get_listening_ports`, `get_suspicious_files`, `get_removable_devices`, `analyze_suspicious_processes`) |
+| MEDIUM | Needs approval unless **Trusted Mode** is ON in the HUD | open/close apps, media, smart home, screen capture (`read_screen`), `run_threat_scan` |
+| HIGH / CRITICAL | Always needs approval via the HUD **SECURITY CLEARANCE** panel or a conversational "yes" | GUI automation (`execute_visual_task`), memory deletion (`forget_memory`), shutdown/restart |
 
 Pending actions appear in the HUD panel with AUTHORIZE / REJECT buttons; approving makes AURA re-run the tool automatically.
 

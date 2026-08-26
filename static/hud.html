@@ -6,7 +6,6 @@
     <title>AURA // AI Assistant</title>
     <link rel="icon" type="image/webp" href="logo_small.webp">
     <link rel="stylesheet" href="tokens.css">
-    <link rel="stylesheet" href="reactor.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -26,7 +25,7 @@
 
         <!-- ── Sidebar navigation ── -->
         <aside class="sidebar">
-            <a class="brand" href="index.html" title="AURA home">
+            <a class="brand" href="/" title="AURA home">
                 <img src="logo_small.webp" alt="AURA Logo" class="brand-logo">
                 <span class="brand-name">AURA</span>
             </a>
@@ -35,6 +34,7 @@
                 <button class="nav-item active" data-view="chat" aria-pressed="true" title="Chat">
                     <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     <span class="nav-label">Chat</span>
+                    <span class="nav-badge" id="chat-plan-badge" hidden></span>
                 </button>
                 <button class="nav-item" data-view="reactor" aria-pressed="false" title="Reactor">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z"/><path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z"/></svg>
@@ -75,6 +75,9 @@
         <div class="hud-main">
 
             <header class="topbar">
+                <button class="btn-menu" id="btn-menu" aria-label="Toggle navigation" aria-expanded="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+                </button>
                 <h1 class="view-title" id="view-title">Chat</h1>
                 <div class="topbar-right">
                     <span class="signal-pill mono" id="hud-signal" title="Wi-Fi uplink">--------</span>
@@ -155,6 +158,25 @@
                         </div>
 
                         <aside class="chat-rail">
+                            <div class="rail-card card plan-card" id="plan-card">
+                                <div class="card-header">
+                                    <span class="plan-header-title">
+                                        <span class="plan-pulse" id="plan-pulse" hidden></span>
+                                        <span>Active Plan</span>
+                                    </span>
+                                    <button class="plan-cancel" id="btn-plan-cancel" title="Cancel active plan" aria-label="Cancel active plan" hidden>×</button>
+                                </div>
+                                <div class="plan-empty" id="plan-empty">No active plan</div>
+                                <div id="plan-body" hidden>
+                                    <div class="plan-goal" id="plan-goal"></div>
+                                    <ol class="plan-steps" id="plan-steps" aria-live="polite"></ol>
+                                    <div class="plan-progress" role="progressbar" aria-label="Plan progress">
+                                        <div class="plan-progress-fill" id="plan-progress-fill"></div>
+                                    </div>
+                                    <div class="plan-progress-label mono" id="plan-progress-label"></div>
+                                </div>
+                            </div>
+
                             <div class="rail-card card schedule-card">
                                 <div class="card-header">
                                     <span>Schedule</span>
@@ -172,18 +194,23 @@
                                 <div class="spotify-panel">
                                     <div class="spotify-content">
                                         <div class="spotify-art">
-                                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.5 0-4.5-2-4.5-4.5S9.5 7.5 12 7.5s4.5 2 4.5 4.5-2 4.5-4.5 4.5zm0-7.5c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                                            <svg id="sp-art-placeholder" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.5 0-4.5-2-4.5-4.5S9.5 7.5 12 7.5s4.5 2 4.5 4.5-2 4.5-4.5 4.5zm0-7.5c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                                            <img id="sp-art-img" alt="Album art" hidden>
                                         </div>
                                         <div class="spotify-info">
-                                            <div class="sp-title">Awaiting input…</div>
-                                            <div class="sp-artist">SYSTEM MEDIA</div>
+                                            <div class="sp-title" id="sp-title">Nothing playing</div>
+                                            <div class="sp-artist" id="sp-artist">SYSTEM MEDIA</div>
                                         </div>
                                     </div>
-                                    <div class="spotify-controls">
+                                    <div class="media-progress" id="media-progress" hidden>
+                                        <div class="media-progress-fill" id="media-progress-fill"></div>
+                                    </div>
+                                    <div class="spotify-controls" id="media-controls">
                                         <button class="sp-btn" id="sp-prev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
                                         <button class="sp-btn" id="sp-play" aria-label="Play / pause"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
                                         <button class="sp-btn" id="sp-next" aria-label="Next track"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
                                     </div>
+                                    <div class="media-hint" id="media-hint" hidden></div>
                                 </div>
                             </div>
                         </aside>
@@ -424,8 +451,12 @@
 
                         <div class="card modules-panel">
                             <div class="card-header"><span>Modules</span></div>
-                            <div class="module-item mod-btn" id="wake-word-toggle" role="switch" aria-checked="false" tabindex="0">
-                                <span>Wake word ("Hey Aura")</span><span class="status-idle module-status" id="wake-word-status">OFF</span>
+                            <div class="module-item mod-btn" id="wake-word-toggle" role="switch" aria-checked="false" tabindex="0" title="Server-side 'Hey Aura' detector (openWakeWord)">
+                                <span>Wake word ("Hey Aura")</span>
+                                <span class="wake-controls">
+                                    <span class="status-idle module-status" id="wake-word-status" title="">OFF</span>
+                                    <button type="button" class="qa-btn compact" id="btn-wake-test" title="Say &quot;Hey Aura&quot; aloud — checks server detection for 10 seconds">TEST</button>
+                                </span>
                             </div>
                             <div class="module-item"><span>Voice core</span><span class="status-active module-status">ACTIVE</span></div>
                             <div class="module-item"><span>Schedule engine</span><span class="status-active module-status">ACTIVE</span></div>
@@ -456,6 +487,8 @@
 
                         <div class="card shortcuts-list-card">
                             <div class="card-header"><span>Keyboard Shortcuts</span></div>
+                            <div class="shortcut-item"><span class="shortcut-desc">Switch views</span><span class="shortcut-keys"><span class="key">1</span> - <span class="key">7</span></span></div>
+                            <div class="shortcut-item"><span class="shortcut-desc">Open shortcuts</span><span class="shortcut-keys"><span class="key">?</span></span></div>
                             <div class="shortcut-item"><span class="shortcut-desc">Clear console</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span></div>
                             <div class="shortcut-item"><span class="shortcut-desc">Toggle voice core</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span></div>
                             <div class="shortcut-item"><span class="shortcut-desc">Close dialogs</span><span class="shortcut-keys"><span class="key">ESC</span></span></div>
@@ -468,6 +501,10 @@
         </div>
     </div>
 
+    <!-- Mobile navigation drawer backdrop (≤820px, toggled by #btn-menu).
+         Lives outside .app-shell so it never becomes a grid item at >820px. -->
+    <div id="drawer-backdrop" aria-hidden="true"></div>
+
     <!-- ═══════════════ TOASTS ═══════════════ -->
     <div class="toast-container" id="toast-container"></div>
 
@@ -478,6 +515,8 @@
                 <div class="modal-title">Keyboard Shortcuts</div>
                 <button class="modal-close" id="close-shortcuts" aria-label="Close">×</button>
             </div>
+            <div class="shortcut-item"><span class="shortcut-desc">Switch views (Chat..Settings)</span><span class="shortcut-keys"><span class="key">1</span> - <span class="key">7</span></span></div>
+            <div class="shortcut-item"><span class="shortcut-desc">Open / close shortcuts</span><span class="shortcut-keys"><span class="key">?</span></span></div>
             <div class="shortcut-item"><span class="shortcut-desc">Clear console</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span></div>
             <div class="shortcut-item"><span class="shortcut-desc">Toggle voice core</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span></div>
             <div class="shortcut-item"><span class="shortcut-desc">Close dialogs</span><span class="shortcut-keys"><span class="key">ESC</span></span></div>
@@ -519,6 +558,8 @@
     <script src="vendor/highlight.min.js"></script>
     <script src="vendor/d3.min.js"></script>
     <script src="reactor.js"></script>
+    <script src="realtime.js"></script>
+    <script src="boot.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

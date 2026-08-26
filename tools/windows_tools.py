@@ -1,7 +1,14 @@
 import os
 import psutil
 import platform
-import wmi
+
+try:
+    import wmi
+    WMI_AVAILABLE = True
+except ImportError:
+    wmi = None
+    WMI_AVAILABLE = False
+
 import winreg
 import datetime
 import subprocess
@@ -9,6 +16,8 @@ import subprocess
 def get_cpu_info() -> str:
     """Gets detailed CPU information including model, cores, and current utilization."""
     try:
+        if not WMI_AVAILABLE:
+            return "CPU info unavailable: the 'wmi' package is not installed."
         w = wmi.WMI()
         cpu_info = w.Win32_Processor()[0]
         usage = psutil.cpu_percent(interval=0.5)
@@ -26,6 +35,8 @@ def get_cpu_info() -> str:
 def get_gpu_info() -> str:
     """Gets GPU model, utilization, and temperature."""
     try:
+        if not WMI_AVAILABLE:
+            return "GPU info unavailable: the 'wmi' package is not installed."
         w = wmi.WMI()
         gpu_info = ""
         for gpu in w.Win32_VideoController():
@@ -34,7 +45,7 @@ def get_gpu_info() -> str:
         
         # Try to get nvidia-smi data if it's an NVIDIA card
         try:
-            smi = subprocess.check_output("nvidia-smi --query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total --format=csv,noheader", shell=True, text=True)
+            smi = subprocess.check_output(["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total", "--format=csv,noheader"], text=True)
             if smi:
                 parts = smi.strip().split(', ')
                 if len(parts) >= 4:

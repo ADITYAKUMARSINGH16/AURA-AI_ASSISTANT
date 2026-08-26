@@ -2,7 +2,7 @@ from .system_tools import get_system_time, get_system_info, read_clipboard, cont
 from .app_tools import open_application, close_application
 from .web_tools import web_search
 from .file_tools import list_directory, read_file
-from .memory_tools import remember_fact, recall_fact, search_memory, forget_fact
+from .memory_tools import remember_fact, recall_fact, search_memory, forget_fact, forget_memory
 from .smart_home_tools import discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene
 from .spotify_tools import search_spotify, play_spotify_music
 from .computer_control_tools import execute_visual_task, get_active_window

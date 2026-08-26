@@ -23,3 +23,11 @@ pywizlight
 openwakeword
 onnxruntime
 pystray
+# Now Playing (SMTC): modern winrt projection family — legacy winsdk has no
+# wheels for current Python builds. Collections package is needed for session
+# iteration. Names in PEP 503 canonical lowercase; upstream publishes them as
+# winrt-Windows.Media.Control etc.
+winrt-windows-media-control
+winrt-windows-foundation
+winrt-windows-storage-streams
+winrt-windows-foundation-collections

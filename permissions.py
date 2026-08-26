@@ -28,7 +28,6 @@ TOOL_RISK_MAP = {
     "get_installed_applications": RiskLevel.SAFE,
     "get_windows_event_logs": RiskLevel.SAFE,
     "get_system_uptime": RiskLevel.SAFE,
-    "read_screen": RiskLevel.SAFE,
     "list_directory": RiskLevel.SAFE,
     "get_active_window": RiskLevel.SAFE,
     "read_clipboard": RiskLevel.SAFE,
@@ -54,8 +53,15 @@ TOOL_RISK_MAP = {
     "report_progress": RiskLevel.LOW,
     "create_temporary_plan": RiskLevel.LOW,
     "remember_fact": RiskLevel.LOW,
+    # Heuristics only read psutil process data (names/CPU/RAM); nothing is killed or modified.
+    "analyze_suspicious_processes": RiskLevel.LOW,
 
     # MEDIUM: Ask for confirmation unless trusted automation is enabled.
+    # Screen capture sends the entire desktop to the vision model — privacy-sensitive,
+    # so require approval outside Trusted Mode even though nothing is mutated.
+    "read_screen": RiskLevel.MEDIUM,
+    # Read-only psutil CPU/RAM anomaly sweep; no state mutation, but user-visible activity.
+    "run_threat_scan": RiskLevel.MEDIUM,
     "open_application": RiskLevel.MEDIUM,
     "close_application": RiskLevel.MEDIUM,
     "control_media": RiskLevel.MEDIUM,
@@ -66,15 +72,14 @@ TOOL_RISK_MAP = {
     "toggle_goal": RiskLevel.MEDIUM,
     "sync_archive": RiskLevel.MEDIUM,
     "scan_home_network": RiskLevel.MEDIUM,
-    
+
     # HIGH: Always require explicit confirmation.
     "execute_visual_task": RiskLevel.HIGH,
     "forget_fact": RiskLevel.HIGH,
-    "analyze_suspicious_processes": RiskLevel.HIGH,
+    "forget_memory": RiskLevel.HIGH,
 
     # CRITICAL: Always require explicit confirmation.
-    "control_system_power": RiskLevel.CRITICAL,
-    "run_threat_scan": RiskLevel.CRITICAL
+    "control_system_power": RiskLevel.CRITICAL
 }
 
 # Confirmation workflow tools must never be blocked themselves,

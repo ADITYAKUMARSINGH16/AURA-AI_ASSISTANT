@@ -170,43 +170,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function startBootSequence() {
-    const bootOverlay = document.getElementById('boot-overlay');
-    const bootProgress = document.getElementById('boot-progress-bar');
-    const bootLinesContainer = document.getElementById('boot-lines');
-
-    const bootLines = [
-        { text: '> AURA KERNEL v2.0 loading...', delay: 160 },
-        { text: '> Neural mesh handshake ............... ', suffix: '<span class="bok">[OK]</span>', delay: 220 },
-        { text: '> Voice core calibrated ............... ', suffix: '<span class="bok">[OK]</span>', delay: 220 },
-        { text: '> Sensor array online ................. ', suffix: '<span class="bok">[OK]</span>', delay: 220 },
-        { text: '> All subsystems nominal.', delay: 180 }
-    ];
-
-    let lineIndex = 0;
-
-    function renderLine() {
-        if (lineIndex >= bootLines.length) {
-            if(bootProgress) bootProgress.style.width = '100%';
-            setTimeout(() => {
-                if(bootOverlay) bootOverlay.classList.add('dismissed');
-            }, 400);
-            return;
-        }
-
-        const l = bootLines[lineIndex];
-        const div = document.createElement('div');
-        div.className = 'bline';
-        div.innerHTML = l.text + (l.suffix || '');
-        if(bootLinesContainer) bootLinesContainer.appendChild(div);
-        if(audioSys) audioSys.playTyping();
-
-        if(bootProgress) bootProgress.style.width = ((lineIndex + 1) / bootLines.length * 100) + '%';
-
-        lineIndex++;
-        setTimeout(renderLine, l.delay);
-    }
-
-    setTimeout(renderLine, 600);
+    // Brief variant of the shared boot (static/boot.js); typing audio per line.
+    AuraBoot.run({ variant: 'brief', onLine: () => audioSys?.playTyping() });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -227,10 +192,32 @@ function showView(name) {
     if (titleEl) titleEl.textContent = section?.dataset.title || name;
     try { localStorage.setItem('aura-view', name); } catch (e) {}
     // Lazy-init panels that own hardware/network resources
-    if (name === 'security') initWebcam();
+    if (name === 'security') { initWebcam(); fetchThreats(); }
     // Reactor render loop only burns frames while the Reactor view is up
     reactor.setActive(name === 'reactor');
+    // Bus events for hidden views are intentionally dropped; on activation,
+    // pull one fresh snapshot immediately instead of waiting for the next tick.
+    if (name === 'system') { fetchProcesses(); fetchLogs(); }
+    // In drawer mode (≤820px), choosing a destination closes the drawer.
+    if (window.matchMedia('(max-width: 820px)').matches) setDrawer(false);
 }
+
+// ── Mobile navigation drawer (≤820px) ──
+const menuBtn = document.getElementById('btn-menu');
+const drawerBackdrop = document.getElementById('drawer-backdrop');
+
+function setDrawer(open) {
+    document.body.classList.toggle('drawer-open', open);
+    menuBtn?.setAttribute('aria-expanded', String(!!open));
+}
+
+menuBtn?.addEventListener('click', () => {
+    setDrawer(!document.body.classList.contains('drawer-open'));
+});
+drawerBackdrop?.addEventListener('click', () => setDrawer(false));
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('drawer-open')) setDrawer(false);
+});
 
 document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
@@ -369,6 +356,9 @@ function toggleShortcuts() {
 
 btnShortcuts.addEventListener('click', toggleShortcuts);
 btnCloseShortcuts.addEventListener('click', () => shortcutsModal.classList.remove('active'));
+shortcutsModal.addEventListener('click', (e) => {
+    if (e.target === shortcutsModal) shortcutsModal.classList.remove('active');
+});
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -385,12 +375,32 @@ document.addEventListener('keydown', (e) => {
         terminalOutput.innerHTML = '';
         chatOutput.innerHTML = '';
         showToast('SYSTEM', 'Console cleared.', 'info');
+        return;
     }
 
     // Ctrl + M: Toggle Voice Core
     if (e.ctrlKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         voiceBtn.click();
+        return;
+    }
+
+    // '?' to toggle shortcuts when not in an editable field
+    const inEditable = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
+    if (e.key === '?' && !inEditable) {
+        e.preventDefault();
+        toggleShortcuts();
+        return;
+    }
+
+    // 1-7 to switch views when not typing in an input
+    if (!inEditable && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const num = parseInt(e.key, 10);
+        if (num >= 1 && num <= VIEW_NAMES.length) {
+            e.preventDefault();
+            showView(VIEW_NAMES[num - 1]);
+            return;
+        }
     }
 });
 
@@ -704,49 +714,170 @@ commandInput.addEventListener('keydown', async (e) => {
             chatOutput.appendChild(thinkingDiv);
             chatOutput.scrollTop = chatOutput.scrollHeight;
 
-            const response = await api('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                timeout: 300000 // agent may loop through tools for minutes
-            });
+            // Streaming transport by default; ?stream=off or window.AURA_STREAM_OFF
+            // falls back to the classic blocking endpoint.
+            const useStream = !window.AURA_STREAM_OFF &&
+                new URLSearchParams(window.location.search).get('stream') !== 'off';
 
-            if (!response.ok) throw new Error('Network response was not ok');
+            let accumulatedText = '';
 
-            const data = await response.json();
-            const accumulatedText = (data && typeof data.response === 'string') ? data.response : '';
+            if (useStream) {
+                const res = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok || !res.body) throw new Error('Stream request failed (HTTP ' + res.status + ')');
 
-            thinkingDiv.remove();
-            setAuraState('idle');
+                thinkingDiv.remove();
+                const bubble = document.createElement('div');
+                bubble.className = 'chat-bubble bubble-aura';
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'stream-status';
+                statusDiv.style.cssText = 'font-size:10px;opacity:.65;margin:4px 0 8px 2px;letter-spacing:.4px;min-height:12px;';
+                chatOutput.appendChild(bubble);
+                chatOutput.appendChild(statusDiv);
 
-            if (accumulatedText) {
-                const currentBubble = document.createElement('div');
-                currentBubble.className = 'chat-bubble bubble-aura';
-                chatOutput.appendChild(currentBubble);
+                let lastRender = 0;
+                let renderTimer = null;
+                let streamError = null;
 
-                if (window.marked && window.DOMPurify) {
-                    currentBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
-                    if (window.hljs) {
-                        currentBubble.querySelectorAll('pre code').forEach((block) => {
-                            hljs.highlightElement(block);
-                        });
+                const renderPartial = () => {
+                    if (!accumulatedText) return;
+                    if (window.marked && window.DOMPurify) {
+                        bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+                    } else {
+                        bubble.textContent = accumulatedText;
                     }
-                } else {
-                    currentBubble.textContent = accumulatedText;
+                    chatOutput.scrollTop = chatOutput.scrollHeight;
+                };
+                // Throttle markdown re-rendering to ~150ms during streaming.
+                const scheduleRender = () => {
+                    const now = Date.now();
+                    const elapsed = now - lastRender;
+                    if (elapsed >= 150) {
+                        lastRender = now;
+                        renderPartial();
+                    } else if (!renderTimer) {
+                        renderTimer = setTimeout(() => { renderTimer = null; scheduleRender(); }, 150 - elapsed);
+                    }
+                };
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let sseBuf = '';
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    sseBuf += decoder.decode(value, { stream: true });
+                    let sep;
+                    while ((sep = sseBuf.indexOf('\n\n')) !== -1) {
+                        const frame = sseBuf.slice(0, sep);
+                        sseBuf = sseBuf.slice(sep + 2);
+                        const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
+                        if (!dataLine) continue;
+                        let ev;
+                        try { ev = JSON.parse(dataLine.slice(5).trim()); } catch (e) { continue; }
+
+                        if (ev.type === 'token') {
+                            accumulatedText += ev.text || '';
+                            scheduleRender();
+                        } else if (ev.type === 'tool_start') {
+                            statusDiv.textContent = 'Running ' + ev.tool + '\u2026';
+                        } else if (ev.type === 'tool_result') {
+                            statusDiv.textContent = ev.tool + ' done.';
+                        } else if (ev.type === 'permission_request') {
+                            statusDiv.textContent = 'Waiting for approval \u2014 ' + ev.tool + ' (' + ev.risk + '). Click AUTHORIZE in the panel or reply Yes.';
+                        } else if (ev.type === 'meta') {
+                            // Intent info; no UI change needed yet.
+                        } else if (ev.type === 'done') {
+                            accumulatedText = (typeof ev.text === 'string') ? ev.text : accumulatedText;
+                        } else if (ev.type === 'error') {
+                            streamError = ev.message || 'Unknown pipeline error.';
+                        }
+                    }
                 }
+                if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+
+                // Final render with syntax highlighting.
+                if (accumulatedText) {
+                    if (window.marked && window.DOMPurify) {
+                        bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+                        if (window.hljs) {
+                            bubble.querySelectorAll('pre code').forEach((block) => {
+                                hljs.highlightElement(block);
+                            });
+                        }
+                    } else {
+                        bubble.textContent = accumulatedText;
+                    }
+                }
+                statusDiv.textContent = streamError ? ('Error: ' + streamError) : '';
+                setTimeout(() => statusDiv.remove(), streamError ? 10000 : 2000);
                 chatOutput.scrollTop = chatOutput.scrollHeight;
 
-                enhanceLatestBubble(accumulatedText);
+                setAuraState('idle');
 
-                const termDiv = document.createElement('div');
-                termDiv.className = 'aura-msg';
-                termDiv.textContent = accumulatedText;
-                terminalOutput.appendChild(termDiv);
-                terminalOutput.scrollTop = terminalOutput.scrollHeight;
+                if (streamError) throw new Error(streamError);
 
-                playTTS(accumulatedText);
+                if (accumulatedText) {
+                    enhanceLatestBubble(accumulatedText);
+
+                    const termDiv = document.createElement('div');
+                    termDiv.className = 'aura-msg';
+                    termDiv.textContent = accumulatedText;
+                    terminalOutput.appendChild(termDiv);
+                    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+
+                    playTTS(accumulatedText);
+                } else {
+                    await appendToTerminal('No response received.', 'error');
+                }
             } else {
-                await appendToTerminal('No response received.', 'error');
+                const response = await api('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    timeout: 300000 // agent may loop through tools for minutes
+                });
+
+                if (!response.ok) throw new Error('Network response was not ok');
+
+                const data = await response.json();
+                accumulatedText = (data && typeof data.response === 'string') ? data.response : '';
+
+                thinkingDiv.remove();
+                setAuraState('idle');
+
+                if (accumulatedText) {
+                    const currentBubble = document.createElement('div');
+                    currentBubble.className = 'chat-bubble bubble-aura';
+                    chatOutput.appendChild(currentBubble);
+
+                    if (window.marked && window.DOMPurify) {
+                        currentBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+                        if (window.hljs) {
+                            currentBubble.querySelectorAll('pre code').forEach((block) => {
+                                hljs.highlightElement(block);
+                            });
+                        }
+                    } else {
+                        currentBubble.textContent = accumulatedText;
+                    }
+                    chatOutput.scrollTop = chatOutput.scrollHeight;
+
+                    enhanceLatestBubble(accumulatedText);
+
+                    const termDiv = document.createElement('div');
+                    termDiv.className = 'aura-msg';
+                    termDiv.textContent = accumulatedText;
+                    terminalOutput.appendChild(termDiv);
+                    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+
+                    playTTS(accumulatedText);
+                } else {
+                    await appendToTerminal('No response received.', 'error');
+                }
             }
         } catch (error) {
             console.error('Chat error:', error);
@@ -929,144 +1060,146 @@ function setDiag(fillId, valId, valueText, pct) {
     if (fill) fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
 }
 
-let telemetryStaleCount = 0;
-
-async function updateTelemetry() {
+// Renders a telemetry payload pushed by the SSE bus (or fetched by the legacy
+// poller). One implementation, two transports.
+function applyTelemetry(data) {
+    if (!data || document.hidden) return;
     const sysCard = document.querySelector('.diagnostics-panel');
-    if (!document.hidden) {
-        try {
-            const response = await api('/api/telemetry', { timeout: 8000 });
-            if (!response.ok) throw new Error('telemetry ' + response.status);
-            const data = await response.json();
-            telemetryStaleCount = 0;
-            setStale(sysCard, false);
-            setStale(document.querySelector('.thermals-panel'), false);
+    try {
+        setStale(sysCard, false);
+        setStale(document.querySelector('.thermals-panel'), false);
 
-            // Diagnostics bars
-            setDiag('load-fill', 'load-val', `${data.cpu}%`, data.cpu);
-            setDiag('mem-fill', 'mem-val', `${data.memory}%`, data.memory);
-            setDiag('uplink-fill', 'uplink-val', `${data.uplink}%`, data.uplink);
-            setDiag('power-fill', 'power-val', `${data.power}%`, data.power);
+        // Diagnostics bars
+        setDiag('load-fill', 'load-val', `${data.cpu}%`, data.cpu);
+        setDiag('mem-fill', 'mem-val', `${data.memory}%`, data.memory);
+        setDiag('uplink-fill', 'uplink-val', `${data.uplink}%`, data.uplink);
+        setDiag('power-fill', 'power-val', `${data.power}%`, data.power);
 
-            // Topbar signal pill (compact 5-block meter)
-            const uplinkVal = document.getElementById('hud-signal');
-            if(uplinkVal) {
-                let sigStr = "";
-                let p = Math.round((data.uplink / 100) * 5);
-                for(let i=0; i<5; i++) sigStr += (i<p) ? "█" : "░";
-                uplinkVal.textContent = sigStr + ` ${data.uplink}%`;
-            }
-
-            // Thermals: backend sends null when a sensor is unavailable
-            if(data.cpu_temp != null) {
-                setDiag('cpu-temp-fill', 'cpu-temp-val', `${data.cpu_temp}°C`, data.cpu_temp);
-                const cpuTempFill = document.getElementById('cpu-temp-fill');
-                if(cpuTempFill) cpuTempFill.style.background = data.cpu_temp > 85 ? 'var(--danger)' : data.cpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
-            } else {
-                const v = document.getElementById('cpu-temp-val');
-                if (v) v.textContent = 'N/A';
-            }
-
-            if(data.cpu_fan != null) {
-                setDiag('cpu-fan-fill', 'cpu-fan-val', `${data.cpu_fan} RPM`, (data.cpu_fan / 5000) * 100);
-            } else {
-                const v = document.getElementById('cpu-fan-val');
-                if (v) v.textContent = 'N/A';
-            }
-
-            if(data.gpu_temp != null) {
-                setDiag('gpu-temp-fill', 'gpu-temp-val', `${data.gpu_temp}°C`, data.gpu_temp);
-                const gpuTempFill = document.getElementById('gpu-temp-fill');
-                if(gpuTempFill) gpuTempFill.style.background = data.gpu_temp > 85 ? 'var(--danger)' : data.gpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
-            } else {
-                const v = document.getElementById('gpu-temp-val');
-                if (v) v.textContent = 'N/A';
-            }
-
-            if(data.gpu_mem !== undefined) {
-                const v = document.getElementById('gpu-mem-val');
-                if (v) v.textContent = data.gpu_mem;
-                let memParts = String(data.gpu_mem).split('/');
-                if(memParts.length === 2) {
-                    let used = parseInt(memParts[0]);
-                    let total = parseInt(memParts[1]);
-                    if(!isNaN(used) && !isNaN(total) && total > 0) {
-                        setDiag('gpu-mem-fill', 'gpu-mem-val', data.gpu_mem, (used/total)*100);
-                    }
-                }
-            }
-
-            if(data.gpu_fan !== undefined) {
-                const v = document.getElementById('gpu-fan-val');
-                if (v) v.textContent = data.gpu_fan;
-            }
-
-            // Chart Data
-            chartData.cpu.push(data.cpu); chartData.cpu.shift();
-            chartData.mem.push(data.memory); chartData.mem.shift();
-            let netLoad = Math.min(100, Math.max(0, data.uplink || 0));
-            chartData.net.push(netLoad); chartData.net.shift();
-
-            updateGauge('cpu', data.cpu);
-            updateGauge('mem', data.memory);
-            updateGauge('net', netLoad);
-
-            // AURA CORE AI Telemetry
-            if(data.ai) {
-                const ai = data.ai;
-                const modelVal = document.getElementById('ai-model-val');
-                if (modelVal) modelVal.textContent = ai.model || '---';
-                const vramVal = document.getElementById('ai-vram-val');
-                if (vramVal) vramVal.textContent = `${ai.vram}GB`;
-
-                if(ai.telemetry) {
-                    const t = ai.telemetry;
-                    const tokensVal = document.getElementById('ai-tokens-val');
-                    if (tokensVal) tokensVal.textContent = `${(t.tokens_per_sec || 0).toFixed(1)}/s`;
-                    const visionVal = document.getElementById('ai-vision-val');
-                    if (visionVal) visionVal.textContent = `${(t.vision_latency || 0).toFixed(1)}s`;
-                    const toolsVal = document.getElementById('ai-tools-val');
-                    if (toolsVal) toolsVal.textContent = `${(t.tool_latency || 0).toFixed(1)}s`;
-                }
-            }
-        } catch (error) {
-            telemetryStaleCount++;
-            if (telemetryStaleCount >= 3) {
-                setStale(sysCard, true);
-                setStale(document.querySelector('.thermals-panel'), true);
-            }
-            console.warn("Telemetry fetch failed", error.message);
+        // Topbar signal pill (compact 5-block meter)
+        const uplinkVal = document.getElementById('hud-signal');
+        if(uplinkVal) {
+            let sigStr = "";
+            let p = Math.round((data.uplink / 100) * 5);
+            for(let i=0; i<5; i++) sigStr += (i<p) ? "█" : "░";
+            uplinkVal.textContent = sigStr + ` ${data.uplink}%`;
         }
+
+        // Thermals: backend sends null when a sensor is unavailable
+        if(data.cpu_temp != null) {
+            setDiag('cpu-temp-fill', 'cpu-temp-val', `${data.cpu_temp}°C`, data.cpu_temp);
+            const cpuTempFill = document.getElementById('cpu-temp-fill');
+            if(cpuTempFill) cpuTempFill.style.background = data.cpu_temp > 85 ? 'var(--danger)' : data.cpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
+        } else {
+            const v = document.getElementById('cpu-temp-val');
+            if (v) v.textContent = 'N/A';
+        }
+
+        if(data.cpu_fan != null) {
+            setDiag('cpu-fan-fill', 'cpu-fan-val', `${data.cpu_fan} RPM`, (data.cpu_fan / 5000) * 100);
+        } else {
+            const v = document.getElementById('cpu-fan-val');
+            if (v) v.textContent = 'N/A';
+        }
+
+        if(data.gpu_temp != null) {
+            setDiag('gpu-temp-fill', 'gpu-temp-val', `${data.gpu_temp}°C`, data.gpu_temp);
+            const gpuTempFill = document.getElementById('gpu-temp-fill');
+            if(gpuTempFill) gpuTempFill.style.background = data.gpu_temp > 85 ? 'var(--danger)' : data.gpu_temp > 70 ? 'var(--purple)' : 'var(--cyan)';
+        } else {
+            const v = document.getElementById('gpu-temp-val');
+            if (v) v.textContent = 'N/A';
+        }
+
+        if(data.gpu_mem !== undefined) {
+            const v = document.getElementById('gpu-mem-val');
+            if (v) v.textContent = data.gpu_mem;
+            let memParts = String(data.gpu_mem).split('/');
+            if(memParts.length === 2) {
+                let used = parseInt(memParts[0]);
+                let total = parseInt(memParts[1]);
+                if(!isNaN(used) && !isNaN(total) && total > 0) {
+                    setDiag('gpu-mem-fill', 'gpu-mem-val', data.gpu_mem, (used/total)*100);
+                }
+            }
+        }
+
+        if(data.gpu_fan !== undefined) {
+            const v = document.getElementById('gpu-fan-val');
+            if (v) v.textContent = data.gpu_fan;
+        }
+
+        // Chart Data
+        chartData.cpu.push(data.cpu); chartData.cpu.shift();
+        chartData.mem.push(data.memory); chartData.mem.shift();
+        let netLoad = Math.min(100, Math.max(0, data.uplink || 0));
+        chartData.net.push(netLoad); chartData.net.shift();
+
+        updateGauge('cpu', data.cpu);
+        updateGauge('mem', data.memory);
+        updateGauge('net', netLoad);
+
+        // AURA CORE AI Telemetry
+        if(data.ai) {
+            const ai = data.ai;
+            const modelVal = document.getElementById('ai-model-val');
+            if (modelVal) modelVal.textContent = ai.model || '---';
+            const vramVal = document.getElementById('ai-vram-val');
+            if (vramVal) vramVal.textContent = `${ai.vram}GB`;
+
+            if(ai.telemetry) {
+                const t = ai.telemetry;
+                const tokensVal = document.getElementById('ai-tokens-val');
+                if (tokensVal) tokensVal.textContent = `${(t.tokens_per_sec || 0).toFixed(1)}/s`;
+                const visionVal = document.getElementById('ai-vision-val');
+                if (visionVal) visionVal.textContent = `${(t.vision_latency || 0).toFixed(1)}s`;
+                const toolsVal = document.getElementById('ai-tools-val');
+                if (toolsVal) toolsVal.textContent = `${(t.tool_latency || 0).toFixed(1)}s`;
+            }
+        }
+    } catch (error) {
+        console.warn("Telemetry render failed:", error.message);
     }
-    setTimeout(updateTelemetry, 3000);
+}
+
+async function fetchTelemetry() {
+    try {
+        const response = await api('/api/telemetry', { timeout: 8000 });
+        if (!response.ok) throw new Error('telemetry ' + response.status);
+        applyTelemetry(await response.json());
+    } catch (error) {
+        console.warn("Telemetry fetch failed", error.message);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
 // THREAT DETECTION (Security view)
 // ═══════════════════════════════════════════════════════════
+function applyThreats(data) {
+    if (!data || document.hidden) return;
+    try {
+        const box = document.getElementById('threat-box');
+        const val = document.getElementById('threat-val');
+        const msg = document.getElementById('threat-msg');
+
+        if(data.status === 'ELEVATED') {
+            if(val && val.textContent !== 'ELEVATED') {
+                showToast('SECURITY ALERT', 'Anomalous login activity detected!', 'error');
+            }
+            box?.classList.add('elevated');
+            if(val) val.textContent = 'ELEVATED';
+        } else {
+            box?.classList.remove('elevated');
+            if(val) val.textContent = 'CLEAR';
+        }
+        if(msg && data.message) msg.textContent = data.message;
+    } catch(e) {}
+}
+
 async function fetchThreats() {
     try {
         const res = await api('/api/threats', { timeout: 8000 });
-        if (res.ok) {
-            const data = await res.json();
-            const box = document.getElementById('threat-box');
-            const val = document.getElementById('threat-val');
-            const msg = document.getElementById('threat-msg');
-
-            if(data.status === 'ELEVATED') {
-                if(val && val.textContent !== 'ELEVATED') {
-                    showToast('SECURITY ALERT', 'Anomalous login activity detected!', 'error');
-                }
-                box?.classList.add('elevated');
-                if(val) val.textContent = 'ELEVATED';
-            } else {
-                box?.classList.remove('elevated');
-                if(val) val.textContent = 'CLEAR';
-            }
-            if(msg && data.message) msg.textContent = data.message;
-        }
+        if (res.ok) applyThreats(await res.json());
     } catch(e) {}
-    setTimeout(fetchThreats, 10000);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1131,10 +1264,10 @@ document.getElementById('qa-lock')?.addEventListener('click', () => handleFluent
 document.getElementById('qa-web')?.addEventListener('click', () => handleFluentCommand('search the web for the latest news'));
 document.getElementById('qa-scan')?.addEventListener('click', () => handleFluentCommand('run a basic threat scan on the system'));
 
-// Media Control bindings
-document.getElementById('sp-play')?.addEventListener('click', () => handleFluentCommand('toggle media playback'));
-document.getElementById('sp-next')?.addEventListener('click', () => handleFluentCommand('play next track'));
-document.getElementById('sp-prev')?.addEventListener('click', () => handleFluentCommand('play previous track'));
+// Media Control bindings — direct transport control, no LLM in the loop.
+document.getElementById('sp-prev')?.addEventListener('click', () => sendMediaControl('previous'));
+document.getElementById('sp-play')?.addEventListener('click', () => sendMediaControl('playpause'));
+document.getElementById('sp-next')?.addEventListener('click', () => sendMediaControl('next'));
 
 // Ripple Effect
 document.querySelectorAll('.qa-btn, .sp-btn').forEach(btn => {
@@ -1166,39 +1299,36 @@ lightboxOverlay?.addEventListener('click', () => lightboxOverlay.classList.remov
 // ═══════════════════════════════════════════════════════════
 // SCHEDULE & REMINDERS (Chat rail)
 // ═══════════════════════════════════════════════════════════
-let lastScheduleHash = null;
+function applySchedule(data) {
+    if (!data || document.hidden) return;
+    try {
+        const list = document.getElementById('schedule-list');
+        if(list) {
+            list.innerHTML = '';
+            if (!data || data.length === 0) {
+                list.innerHTML = '<div class="schedule-empty">No scheduled events.</div>';
+            } else {
+                data.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'schedule-item';
+                    const timeSpan = document.createElement('span');
+                    timeSpan.textContent = item.time;
+                    const eventSpan = document.createElement('span');
+                    eventSpan.textContent = item.event;
+                    div.appendChild(timeSpan);
+                    div.appendChild(eventSpan);
+                    list.appendChild(div);
+                });
+            }
+        }
+    } catch(e) {}
+}
 
 async function fetchSchedule() {
     try {
         const res = await api('/api/schedule', { timeout: 8000 });
-        if(res.ok) {
-            const data = await res.json();
-            const hash = JSON.stringify(data);
-            if (hash !== lastScheduleHash) {
-                lastScheduleHash = hash;
-                const list = document.getElementById('schedule-list');
-                if(list) {
-                    list.innerHTML = '';
-                    if (!data || data.length === 0) {
-                        list.innerHTML = '<div class="schedule-empty">No scheduled events.</div>';
-                    } else {
-                        data.forEach(item => {
-                            const div = document.createElement('div');
-                            div.className = 'schedule-item';
-                            const timeSpan = document.createElement('span');
-                            timeSpan.textContent = item.time;
-                            const eventSpan = document.createElement('span');
-                            eventSpan.textContent = item.event;
-                            div.appendChild(timeSpan);
-                            div.appendChild(eventSpan);
-                            list.appendChild(div);
-                        });
-                    }
-                }
-            }
-        }
+        if(res.ok) applySchedule(await res.json());
     } catch(e) {}
-    setTimeout(fetchSchedule, 30000);
 }
 
 document.getElementById('btn-add-sched')?.addEventListener('click', async () => {
@@ -1216,7 +1346,6 @@ document.getElementById('btn-add-sched')?.addEventListener('click', async () => 
         if(data.status === 'success') {
             document.getElementById('sched-time').value = '';
             document.getElementById('sched-event').value = '';
-            lastScheduleHash = null; // force re-render
             showToast('SCHEDULE UPDATED', `Added: ${event}`, 'success');
             fetchSchedule();
         }
@@ -1388,32 +1517,19 @@ window.addEventListener('resize', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// PROCESS MANAGER (System view) — diff-render + confirm kill
+// PROCESS MANAGER (System view) — confirm kill
 // ═══════════════════════════════════════════════════════════
-let lastProcessHash = null;
-let processFailures = 0;
+function applyProcesses(data) {
+    if (!data || document.hidden || !isViewActive('system')) return;
+    setStale(document.querySelector('.process-panel'), false);
+    renderProcesses(data.processes || []);
+}
 
 async function fetchProcesses() {
-    const pollActive = isViewActive('system');
-    if (!document.hidden && pollActive) {
-        try {
-            const res = await api('/api/processes', { timeout: 8000 });
-            if(res.ok) {
-                const data = await res.json();
-                processFailures = 0;
-                setStale(document.querySelector('.process-panel'), false);
-                const hash = JSON.stringify(data.processes || []);
-                if (hash !== lastProcessHash) {
-                    lastProcessHash = hash;
-                    renderProcesses(data.processes || []);
-                }
-            }
-        } catch(e) {
-            processFailures++;
-            if (processFailures >= 3) setStale(document.querySelector('.process-panel'), true);
-        }
-    }
-    setTimeout(fetchProcesses, pollActive ? 5000 : 30000);
+    try {
+        const res = await api('/api/processes', { timeout: 8000 });
+        if(res.ok) applyProcesses(await res.json());
+    } catch(e) {}
 }
 
 function renderProcesses(processes) {
@@ -1476,14 +1592,9 @@ function renderProcesses(processes) {
 const permissionsList = document.getElementById('permissions-list');
 const trustedModeToggle = document.getElementById('trusted-mode-toggle');
 
-async function fetchPermissions() {
-    if (!permissionsList) return;
-    if (document.hidden) return;
+function applyPermissions(data) {
+    if (!permissionsList || !data || document.hidden) return;
     try {
-        const res = await api('/api/permissions/pending', { timeout: 8000 });
-        if (!res.ok) return;
-        const data = await res.json();
-
         if (trustedModeToggle && !trustedModeToggle.matches(':focus')) {
             trustedModeToggle.checked = !!data.trusted_automation;
         }
@@ -1557,7 +1668,12 @@ if (trustedModeToggle) {
         }
     });
 }
-setInterval(fetchPermissions, 3000);
+async function fetchPermissions() {
+    try {
+        const res = await api('/api/permissions/pending', { timeout: 8000 });
+        if (res.ok) applyPermissions(await res.json());
+    } catch (e) {}
+}
 fetchPermissions();
 
 // ═══════════════════════════════════════════════════════════
@@ -1581,7 +1697,9 @@ document.getElementById('close-drawer')?.addEventListener('click', () => {
     notifDrawer?.classList.remove('open');
 });
 
-async function pollNotifications() {
+// The SSE bus only signals availability (it must not consume the shared
+// server-side queue); this REST call remains the single consumer.
+async function consumeNotifications() {
     if (document.hidden) return;
     try {
         const response = await api('/api/notifications', { timeout: 8000 });
@@ -1622,61 +1740,80 @@ async function pollNotifications() {
         }
     } catch (e) {}
 }
-setInterval(pollNotifications, 5000);
-pollNotifications();
+// Push-triggered consume: the bus wakes us when the queue is non-empty.
+function onNotificationsUpdate(data) {
+    if (!data || data.available === false) return;
+    consumeNotifications();
+}
+consumeNotifications();
 
 // ═══════════════════════════════════════════════════════════
-// WAKE WORD ("Hey Aura")
+// WAKE WORD ("Hey Aura") — server-side detection only.
+//
+// Detection runs exclusively in the backend (openWakeWord ONNX, see
+// voice.py). The HUD toggle is a pure control for
+// POST /api/wakeword/toggle {enabled}; state comes from
+// GET /api/wakeword/status (5s poll) and the bus 'wakeword_status'
+// broadcast fired on toggle. The browser mic opens only for
+// visualization during active listening sessions.
 // ═══════════════════════════════════════════════════════════
 let wakeWordActive = false;
-let wakeRecognition = null;
+let wakeStatusError = null;      // last server-side model error, if any
+let wakeTestUntil = 0;           // epoch ms the "Test detection" window ends
 const wakeWordToggle = document.getElementById('wake-word-toggle');
 const wakeWordStatus = document.getElementById('wake-word-status');
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const wakeTestBtn = document.getElementById('btn-wake-test');
 
-if (SpeechRecognition) {
-    wakeRecognition = new SpeechRecognition();
-    wakeRecognition.continuous = true;
-    wakeRecognition.interimResults = true;
-    wakeRecognition.lang = 'en-US';
+// One-time migration: the old client-side engine preference is obsolete.
+try { localStorage.removeItem('aura-wakeword-engine'); } catch (e) {}
 
-    wakeRecognition.onresult = async (event) => {
-        if (!wakeWordActive) return;
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            const rawTranscript = event.results[i][0].transcript.toLowerCase();
-            if (rawTranscript.includes('hey aura') && event.results[i].isFinal) {
-                wakeRecognition.stop();
-                if (canStartListening()) voiceBtn.click();
-                break;
-            }
-        }
-    };
-    wakeRecognition.onerror = () => {
-        if(wakeWordActive) setTimeout(() => { try{wakeRecognition.start()}catch(e){} }, 1000);
-    };
-    wakeRecognition.onend = () => {
-        if(wakeWordActive) try{wakeRecognition.start()}catch(e){}
-    };
+function applyWakeStatus(data) {
+    if (!data) return;
+    wakeWordActive = !!data.enabled;
+    wakeStatusError = data.enabled && !data.model_loaded ? (data.error || 'model failed to load') : null;
+    wakeWordToggle?.setAttribute('aria-checked', String(wakeWordActive));
+    if (!wakeWordStatus) return;
+    if (!wakeWordActive) {
+        wakeWordStatus.textContent = 'OFF';
+        wakeWordStatus.className = 'status-idle module-status';
+        wakeWordStatus.title = 'Wake word disabled';
+    } else if (wakeStatusError) {
+        wakeWordStatus.textContent = 'ERROR';
+        wakeWordStatus.className = 'status-error module-status';
+        wakeWordStatus.title = 'Wake word detector failed: ' + wakeStatusError;
+    } else if (!data.listening) {
+        wakeWordStatus.textContent = 'ERROR';
+        wakeWordStatus.className = 'status-error module-status';
+        wakeWordStatus.title = 'Detector armed but the mic stream is not open yet '
+            + '(startup, or no usable input device — check server logs).';
+    } else {
+        wakeWordStatus.textContent = 'LISTENING';
+        wakeWordStatus.className = 'status-active module-status';
+        const last = data.last_detection_ts ? new Date(data.last_detection_ts * 1000).toLocaleTimeString() : 'never';
+        wakeWordStatus.title = `Listening for "Hey Aura" (threshold ${data.threshold ?? '—'}) · last detection: ${last}`
+            + (data.false_positives_today ? ` · near-misses today: ${data.false_positives_today}` : '');
+    }
+}
+
+async function fetchWakeStatus() {
+    try {
+        const res = await api('/api/wakeword/status', { timeout: 8000 });
+        if (res.ok) applyWakeStatus(await res.json());
+    } catch (e) {}
 }
 
 function toggleWakeWord() {
-    wakeWordActive = !wakeWordActive;
-    // Keep the backend openwakeword listener in sync with the HUD toggle
+    const next = !wakeWordActive;
+    // Optimistic flip; the status poll/broadcast corrects if the POST fails.
+    applyWakeStatus({ enabled: next, model_loaded: true, threshold: undefined, last_detection_ts: 0 });
     api('/api/wakeword/toggle', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({enabled: wakeWordActive})
-    }).catch(() => {});
-    wakeWordToggle?.setAttribute('aria-checked', String(wakeWordActive));
-    if (wakeWordActive) {
-        wakeWordStatus.textContent = 'ACTIVE';
-        wakeWordStatus.className = 'status-active module-status';
-        try { wakeRecognition.start(); } catch(e) {}
-        showToast('MODULE ACTIVE', 'Wake word "Hey Aura" enabled.', 'info');
+        body: JSON.stringify({enabled: next})
+    }).then(() => fetchWakeStatus()).catch(() => { fetchWakeStatus(); });
+    if (next) {
+        showToast('MODULE ACTIVE', 'Wake word "Hey Aura" enabled (server detector).', 'info');
     } else {
-        wakeWordStatus.textContent = 'OFF';
-        wakeWordStatus.className = 'status-idle module-status';
-        try { wakeRecognition.stop(); } catch(e) {}
         showToast('MODULE OFFLINE', 'Wake word disabled.', 'warning');
     }
 }
@@ -1688,24 +1825,50 @@ wakeWordToggle?.addEventListener('keydown', (e) => {
     }
 });
 
-// Sync the HUD toggle with the backend listener state on page load
-(async () => {
-    try {
-        const res = await api('/api/wakeword/status', { timeout: 8000 });
-        if (!res.ok) return;
-        const data = await res.json();
-        wakeWordActive = !!data.enabled;
-        wakeWordToggle?.setAttribute('aria-checked', String(wakeWordActive));
-        if (wakeWordActive) {
-            wakeWordStatus.textContent = 'ACTIVE';
-            wakeWordStatus.className = 'status-active module-status';
-            try { wakeRecognition.start(); } catch(e) {}
-        } else {
-            wakeWordStatus.textContent = 'OFF';
-            wakeWordStatus.className = 'status-idle module-status';
+// Test detection: arms a 10s window and reports whether the server
+// detector registered a fresh "Hey Aura" (last_detection_ts advances).
+// Purely informational — it does not trigger a listening session.
+wakeTestBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (Date.now() < wakeTestUntil) return;
+    if (!wakeWordActive) {
+        showToast('WAKE WORD OFF', 'Enable the wake word toggle first.', 'warning');
+        return;
+    }
+    wakeTestUntil = Date.now() + 10000;
+    const armedAtSec = Date.now() / 1000;
+    wakeTestBtn.textContent = '…10s';
+    wakeTestBtn.disabled = true;
+    showToast('TEST ARMED', 'Say "Hey Aura" aloud now.', 'info');
+    const poll = setInterval(async () => {
+        let hit = false, last = null;
+        try {
+            const res = await api('/api/wakeword/status', { timeout: 4000 });
+            if (res.ok) {
+                const data = await res.json();
+                last = data.last_detection_ts || 0;
+                hit = last > armedAtSec;
+                applyWakeStatus(data);
+            }
+        } catch (err) {}
+        if (hit || Date.now() >= wakeTestUntil) {
+            clearInterval(poll);
+            wakeTestBtn.textContent = 'TEST';
+            wakeTestBtn.disabled = false;
+            wakeTestUntil = 0;
+            if (hit) {
+                showToast('TEST PASSED', `"Hey Aura" detected at ${new Date(last * 1000).toLocaleTimeString()}.`, 'success');
+            } else {
+                showToast('TEST FAILED', 'No detection within 10s. Check mic selection / model in server logs.', 'warning');
+            }
         }
-    } catch (e) {}
-})();
+    }, 1000);
+});
+
+// Server pushes state on toggle; poll covers page load and missed events.
+Realtime.on('wakeword_status', applyWakeStatus);
+setInterval(() => { if (!document.hidden) fetchWakeStatus(); }, 5000);
+fetchWakeStatus();
 
 // ═══════════════════════════════════════════════════════════
 // FILE EXPLORER (Files view)
@@ -2016,11 +2179,9 @@ fetchProactiveConfig();
 // ═══════════════════════════════════════════════════════════
 // LOCAL SECURITY CENTER (Security view)
 // ═══════════════════════════════════════════════════════════
-async function fetchSecurity() {
-    if (document.hidden) return;
+function applySecurity(data) {
+    if (document.hidden || !data) return;
     try {
-        const res = await api('/api/security', { timeout: 30000 });
-        const data = await res.json();
         if (data.status === 'success') {
             const riskEl = document.getElementById('sec-risk-val');
             riskEl.innerText = data.risk_level;
@@ -2064,48 +2225,54 @@ async function fetchSecurity() {
     }
 }
 
+async function fetchSecurity() {
+    if (document.hidden) return;
+    try {
+        const res = await api('/api/security', { timeout: 30000 });
+        applySecurity(await res.json());
+    } catch (err) {
+        console.warn("Security fetch failed:", err.message);
+    }
+}
+
 document.getElementById('btn-sec-refresh')?.addEventListener('click', () => {
     const detailsEl = document.getElementById('sec-details-container');
     if(detailsEl) detailsEl.innerText = 'Scanning…';
     fetchSecurity();
 });
 fetchSecurity();
-setInterval(fetchSecurity, 30000);
 
 // ═══════════════════════════════════════════════════════════
 // SYSTEM LOGS VIEWER (System view) — diff-render + smart scroll
 // ═══════════════════════════════════════════════════════════
 const logOutput = document.getElementById('log-output');
 const btnLogRefresh = document.getElementById('btn-log-refresh');
-let lastLogsRaw = '';
+
+function applyLogsData(data, manual = false) {
+    if (!logOutput || !data) return;
+    if (data.status === 'success' && data.lines) {
+        const nearBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 48;
+        logOutput.innerHTML = '';
+        data.lines.forEach(line => {
+            const div = document.createElement('div');
+            div.className = 'log-line';
+            div.textContent = line;
+            logOutput.appendChild(div);
+        });
+        if (nearBottom || manual) logOutput.scrollTop = logOutput.scrollHeight;
+    } else if (manual) {
+        logOutput.innerHTML = '<div class="log-line log-error">[ERROR] Failed to read logs.</div>';
+    }
+}
 
 async function fetchLogs(manual = false) {
     if (!logOutput) return;
     if (!manual && (document.hidden || !isViewActive('system'))) return;
     try {
         const res = await api('/api/logs', { timeout: 8000 });
-        const data = await res.json();
-        if (data.status === 'success' && data.lines) {
-            const raw = data.lines.join('\n');
-            if (raw === lastLogsRaw && !manual) return;
-            lastLogsRaw = raw;
-
-            const nearBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 48;
-            logOutput.innerHTML = '';
-            data.lines.forEach(line => {
-                const div = document.createElement('div');
-                div.className = 'log-line';
-                div.textContent = line;
-                logOutput.appendChild(div);
-            });
-            if (nearBottom || manual) logOutput.scrollTop = logOutput.scrollHeight;
-        } else if (manual) {
-            lastLogsRaw = '';
-            logOutput.innerHTML = '<div class="log-line log-error">[ERROR] Failed to read logs.</div>';
-        }
+        applyLogsData(await res.json(), manual);
     } catch (e) {
         if (manual) {
-            lastLogsRaw = '';
             logOutput.innerHTML = '<div class="log-line log-error">[ERROR] Connection failed.</div>';
         }
     }
@@ -2114,10 +2281,6 @@ async function fetchLogs(manual = false) {
 if (btnLogRefresh) {
     btnLogRefresh.addEventListener('click', () => fetchLogs(true));
 }
-// Auto-refresh only while the System view is open
-setInterval(() => {
-    if (isViewActive('system')) fetchLogs();
-}, 10000);
 fetchLogs();
 
 // ═══════════════════════════════════════════════════════════
@@ -2154,10 +2317,287 @@ document.querySelectorAll('.theme-dot').forEach(dot => {
 // ═══════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// ACTIVE PLAN CARD (Chat rail) — SSE-driven, poll fallback
+// ═══════════════════════════════════════════════════════════
+const planPulse = document.getElementById('plan-pulse');
+const planEmpty = document.getElementById('plan-empty');
+const planBody = document.getElementById('plan-body');
+const planGoal = document.getElementById('plan-goal');
+const planStepsEl = document.getElementById('plan-steps');
+const planFill = document.getElementById('plan-progress-fill');
+const planProgressLabel = document.getElementById('plan-progress-label');
+const planCancelBtn = document.getElementById('btn-plan-cancel');
+const chatPlanBadge = document.getElementById('chat-plan-badge');
+let lastPlanHash = null;
+let currentPlanId = null;
+
+function applyPlan(plan) {
+    // Server already dedupes unchanged payloads; hash-skip guards against
+    // duplicate deliveries and redundant poll results.
+    const hash = JSON.stringify(plan);
+    if (hash === lastPlanHash) return;
+    lastPlanHash = hash;
+
+    if (!plan || plan.status !== 'active') {
+        // Completed or cancelled: collapse to the quiet empty-state.
+        currentPlanId = null;
+        if (planBody) planBody.hidden = true;
+        if (planEmpty) planEmpty.hidden = false;
+        if (planPulse) planPulse.hidden = true;
+        if (planCancelBtn) planCancelBtn.hidden = true;
+        if (chatPlanBadge) chatPlanBadge.hidden = true;
+        return;
+    }
+
+    currentPlanId = plan.id;
+    if (planEmpty) planEmpty.hidden = true;
+    if (planBody) planBody.hidden = false;
+    if (planPulse) planPulse.hidden = false;
+    if (planCancelBtn) planCancelBtn.hidden = false;
+
+    if (planGoal) planGoal.textContent = plan.goal || 'Active plan';
+    const steps = Array.isArray(plan.steps) ? plan.steps : [];
+    if (planStepsEl) {
+        planStepsEl.innerHTML = '';
+        steps.forEach(s => {
+            const li = document.createElement('li');
+            const isCurrent = s.index === plan.current_step && s.status !== 'done';
+            li.className = 'plan-step' + (s.status === 'done' ? ' done' : isCurrent ? ' current' : '');
+            const icon = s.status === 'done' ? '✓' : (isCurrent ? '▸' : '○');
+            li.innerHTML =
+                `<span class="plan-step-icon">${icon}</span>` +
+                `<span class="plan-step-text">${escapeHtml(s.text)}` +
+                (s.note ? ` <em class="plan-note">— ${escapeHtml(s.note)}</em>` : '') +
+                `</span>`;
+            planStepsEl.appendChild(li);
+        });
+    }
+
+    const total = steps.length;
+    const doneCount = steps.filter(s => s.status === 'done').length;
+    const pct = total ? Math.round((doneCount / total) * 100) : 0;
+    if (planFill) planFill.style.width = pct + '%';
+    if (planProgressLabel) {
+        planProgressLabel.textContent = total
+            ? `${doneCount}/${total} steps · step ${Math.min(plan.current_step, total)} active`
+            : '';
+    }
+
+    // Sidebar badge: how many steps remain while the plan runs.
+    const remaining = Math.max(0, total - doneCount);
+    if (chatPlanBadge) {
+        chatPlanBadge.textContent = remaining;
+        chatPlanBadge.hidden = remaining === 0;
+    }
+}
+
+async function fetchActivePlan() {
+    try {
+        const res = await api('/api/plans/active', { timeout: 8000 });
+        if (!res.ok) return;
+        const data = await res.json();
+        applyPlan(data.plan || null);
+    } catch (e) {}
+}
+
+function initPlans() {
+    if (!document.getElementById('plan-card')) return;
+    Realtime.on('plan_update', () => fetchActivePlan());
+    // Fallback for when the SSE bus isn't available.
+    setInterval(() => {
+        if (!Realtime.connected && !document.hidden) fetchActivePlan();
+    }, 5000);
+    fetchActivePlan();
+
+    planCancelBtn?.addEventListener('click', async () => {
+        if (!currentPlanId) return;
+        const ok = await confirmAction({
+            title: 'CANCEL PLAN',
+            message: 'Cancel the active plan? Completed steps are kept in history.',
+            okLabel: 'CANCEL PLAN'
+        });
+        if (!ok) return;
+        try {
+            await api(`/api/plans/${currentPlanId}/cancel`, { method: 'POST', timeout: 10000 });
+            showToast('PLAN CANCELLED', 'The active plan was cancelled.', 'info');
+            fetchActivePlan();
+        } catch (e) {
+            showToast('ERROR', 'Could not cancel the plan.', 'error');
+        }
+    });
+}
+
+// ═══════════════════════════════════════════════════════════
+// NOW PLAYING CARD (Chat rail) — SMTC via /api/media
+// ═══════════════════════════════════════════════════════════
+const spArtImg = document.getElementById('sp-art-img');
+const spArtPlaceholder = document.getElementById('sp-art-placeholder');
+const spTitleEl = document.getElementById('sp-title');
+const spArtistEl = document.getElementById('sp-artist');
+const mediaControlsEl = document.getElementById('media-controls');
+const mediaProgressBar = document.getElementById('media-progress');
+const mediaProgressFill = document.getElementById('media-progress-fill');
+const mediaHint = document.getElementById('media-hint');
+const spPlayBtn = document.getElementById('sp-play');
+let lastMedia = null;
+let mediaAnchor = { pos: 0, at: 0, playing: false, duration: 0, known: false };
+let optimisticPlaying = null; // set between an optimistic icon flip and the next payload
+
+const PLAY_ICON = 'M8 5v14l11-7z';
+const PAUSE_ICON = 'M7 5h4v14H7zm6 0h4v14h-4z';
+
+function setPlayIcon(playing) {
+    spPlayBtn?.querySelector('path')?.setAttribute('d', playing ? PAUSE_ICON : PLAY_ICON);
+}
+
+function mediaSetControlsDisabled(disabled) {
+    mediaControlsEl?.classList.toggle('media-disabled', disabled);
+}
+
+function applyMedia(data) {
+    if (!data) return;
+    lastMedia = data;
+
+    const hasTrack = !!(data.title || data.artist);
+    if (!data.available) {
+        if (spTitleEl) spTitleEl.textContent = 'Nothing playing';
+        if (spArtistEl) spArtistEl.textContent = 'SYSTEM MEDIA';
+        if (mediaHint) {
+            mediaHint.textContent = 'Metadata unavailable — ' + (data.reason || 'SMTC missing');
+            mediaHint.hidden = false;
+        }
+        mediaSetControlsDisabled(true);
+    } else if (!hasTrack) {
+        if (spTitleEl) spTitleEl.textContent = 'Nothing playing';
+        if (spArtistEl) spArtistEl.textContent = 'SYSTEM MEDIA';
+        if (mediaHint) mediaHint.hidden = true;
+        mediaSetControlsDisabled(true);
+    } else {
+        if (spTitleEl) spTitleEl.textContent = data.title;
+        if (spArtistEl) spArtistEl.textContent = [data.artist, data.app].filter(Boolean).join(' · ') || 'SYSTEM MEDIA';
+        if (mediaHint) mediaHint.hidden = true;
+        mediaSetControlsDisabled(false);
+    }
+
+    // Album art with graceful fallback to the placeholder glyph.
+    if (data.album_art && spArtImg) {
+        spArtImg.src = data.album_art;
+        spArtImg.hidden = false;
+        if (spArtPlaceholder) spArtPlaceholder.hidden = true;
+    } else {
+        if (spArtImg) { spArtImg.removeAttribute('src'); spArtImg.hidden = true; }
+        if (spArtPlaceholder) spArtPlaceholder.hidden = false;
+    }
+
+    const playing = optimisticPlaying !== null ? optimisticPlaying : !!data.playing;
+    setPlayIcon(playing);
+    optimisticPlaying = null;
+
+    // Progress anchor: 1s local interpolation between server payloads.
+    const known = data.position_s != null && data.duration_s != null && data.duration_s > 0;
+    mediaAnchor = {
+        pos: data.position_s || 0,
+        at: Date.now(),
+        playing: !!data.playing,
+        duration: data.duration_s || 0,
+        known
+    };
+    if (mediaProgressBar) mediaProgressBar.hidden = !known;
+    renderMediaProgress();
+}
+
+function renderMediaProgress() {
+    if (!mediaAnchor.known || !mediaProgressFill) return;
+    const elapsed = mediaAnchor.playing ? (Date.now() - mediaAnchor.at) / 1000 : 0;
+    const pos = Math.min(mediaAnchor.pos + elapsed, mediaAnchor.duration);
+    const pct = mediaAnchor.duration ? (pos / mediaAnchor.duration) * 100 : 0;
+    mediaProgressFill.style.width = pct.toFixed(2) + '%';
+}
+
+async function fetchMedia() {
+    try {
+        const res = await api('/api/media', { timeout: 8000 });
+        if (res.ok) applyMedia(await res.json());
+    } catch (e) {}
+}
+
+async function sendMediaControl(action) {
+    // Optimistic play/pause icon flip; reconciled on the next payload.
+    if (action === 'playpause' && lastMedia && lastMedia.available) {
+        const current = optimisticPlaying !== null ? optimisticPlaying : !!lastMedia.playing;
+        optimisticPlaying = !current;
+        setPlayIcon(optimisticPlaying);
+    }
+    try {
+        await api('/api/media/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action }),
+            timeout: 8000
+        });
+    } catch (e) {}
+    setTimeout(fetchMedia, 1200); // reconcile with real state after the keystroke
+}
+
+function initMedia() {
+    if (!document.getElementById('media-controls')) return;
+    Realtime.on('media_update', applyMedia);
+    // Poll fallback when the bus isn't connected; while connected the bus
+    // pushes on track/state change and progress interpolates locally.
+    setInterval(() => { if (!Realtime.connected && !document.hidden) fetchMedia(); }, 4000);
+    setInterval(renderMediaProgress, 1000);
+    fetchMedia();
+}
+
+// ═══════════════════════════════════════════════════════════
+// DATA TRANSPORT WIRING (SSE bus + legacy fallback)
+// ═══════════════════════════════════════════════════════════
+// Bus-driven channels (GET /api/events): telemetry, threats_update,
+// permissions_update, notifications_update, logs_append, schedule_update,
+// processes_update, security_update.
+//
+// Remaining intentional pollers / one-shots NOT on the bus:
+//   - /api/memory           every 10s (Memory view list; low-value churn)
+//   - /api/wakeword/status  every 5s (Settings wake-word chip; bus broadcast
+//                           'wakeword_status' covers toggle-time updates)
+//   - /api/proactive        Settings view threshold config (load + save)
+//   - /api/captures/last_screen HEAD probe behind the screen-preview refresh
+//   - updateClock()         local clock tick, 1s
+//
+// If the SSE connection fails 3 times consecutively, startLegacyPolling()
+// below re-arms REST polling for every bus channel until the next page load.
+
+function startLegacyPolling() {
+    console.warn('[AURA] SSE unavailable — legacy REST polling re-armed.');
+    setInterval(fetchTelemetry, 3000);
+    setInterval(fetchThreats, 10000);
+    setInterval(fetchPermissions, 3000);
+    setInterval(consumeNotifications, 5000);
+    setInterval(() => { if (!document.hidden && isViewActive('system')) fetchLogs(); }, 10000);
+    setInterval(fetchSchedule, 30000);
+    setInterval(fetchProcesses, 5000);
+    setInterval(fetchSecurity, 30000);
+}
+
+Realtime.on('telemetry', applyTelemetry);
+Realtime.on('threats_update', applyThreats);
+Realtime.on('permissions_update', applyPermissions);
+Realtime.on('notifications_update', onNotificationsUpdate);
+Realtime.on('logs_append', (data) => {
+    if (!document.hidden && isViewActive('system')) applyLogsData(data);
+});
+Realtime.on('schedule_update', applySchedule);
+Realtime.on('processes_update', applyProcesses);
+Realtime.on('security_update', applySecurity);
+
 setTimeout(loadHistory, 1500);
-updateTelemetry();
-fetchSchedule();
+initPlans();
+initMedia();
+fetchSchedule();          // one-shot initial paint; the bus maintains from here
 fetchNetworkScan();
 fetchProcesses();
 refreshScreenPreview();
 fetchThreats();
+Realtime.onFallback(startLegacyPolling);
+Realtime.start();

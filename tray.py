@@ -7,7 +7,7 @@ import webbrowser
 from datetime import datetime
 
 def create_image():
-    # Generate an icon if logo.jpg is missing
+    # Generate an icon if logo_small.png is missing
     image = Image.new('RGB', (64, 64), color=(0, 0, 0))
     dc = ImageDraw.Draw(image)
     dc.rectangle((16, 16, 48, 48), fill=(0, 240, 255))
@@ -27,10 +27,10 @@ backend_process = subprocess.Popen(
 )
 
 def on_open_hud(icon, item):
-    webbrowser.open("http://127.0.0.1:8000/hud.html")
+    webbrowser.open("http://127.0.0.1:8000/")
 
 def on_open_landing(icon, item):
-    webbrowser.open("http://127.0.0.1:8000/")
+    webbrowser.open("http://127.0.0.1:8000/welcome")
 
 def on_quit(icon, item):
     if os.name == 'nt':
@@ -41,7 +41,7 @@ def on_quit(icon, item):
 
 # Load logo or generate one
 try:
-    icon_img = Image.open(os.path.join("static", "logo.jpg"))
+    icon_img = Image.open(os.path.join("static", "logo_small.png"))
 except:
     icon_img = create_image()
 

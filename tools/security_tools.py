@@ -6,8 +6,7 @@ import datetime
 def get_windows_defender_status() -> str:
     """Checks Windows Defender real-time protection and antivirus status."""
     try:
-        cmd = 'powershell -Command "Get-MpComputerStatus | Select-Object -Property RealTimeProtectionEnabled, AntivirusSignatureAge"'
-        result = subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL)
+        result = subprocess.check_output(["powershell", "-NoProfile", "-Command", "Get-MpComputerStatus | Select-Object -Property RealTimeProtectionEnabled, AntivirusSignatureAge"], text=True, stderr=subprocess.DEVNULL)
         if "True" in result:
             return "Windows Defender: Real-Time Protection is ENABLED."
         elif "False" in result:
@@ -19,8 +18,7 @@ def get_windows_defender_status() -> str:
 def get_firewall_status() -> str:
     """Checks the status of Windows Firewall profiles (Domain, Private, Public)."""
     try:
-        cmd = 'powershell -Command "Get-NetFirewallProfile | Select-Object Name, Enabled"'
-        result = subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL)
+        result = subprocess.check_output(["powershell", "-NoProfile", "-Command", "Get-NetFirewallProfile | Select-Object Name, Enabled"], text=True, stderr=subprocess.DEVNULL)
         if not result.strip():
             return "Could not retrieve firewall status."
         return f"Windows Firewall Status:\n{result.strip()}"

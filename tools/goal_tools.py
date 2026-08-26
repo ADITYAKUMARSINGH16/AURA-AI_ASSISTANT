@@ -1,22 +1,23 @@
 import json
-import os
 import uuid
+from pathlib import Path
 
-GOALS_FILE = "goals.json"
+from config import project_path
+
+# Anchor to the project root (tools/../) so the path never depends on CWD.
+GOALS_FILE = Path(project_path("goals.json"))
 
 def _load_goals():
-    if not os.path.exists(GOALS_FILE):
+    if not GOALS_FILE.exists():
         return []
     try:
-        with open(GOALS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        return json.loads(GOALS_FILE.read_text(encoding='utf-8'))
     except Exception:
         return []
 
 def _save_goals(goals):
     try:
-        with open(GOALS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(goals, f, indent=4)
+        GOALS_FILE.write_text(json.dumps(goals, indent=4), encoding='utf-8')
     except Exception as e:
         print(f"Error saving goals: {e}")
 

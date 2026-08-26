@@ -149,29 +149,27 @@ def run_threat_scan() -> str:
 def manage_schedule(action: str, event: str = None, time: str = None) -> str:
     """Manages a local schedule/calendar. action can be 'read', 'add', or 'clear'."""
     import json
-    import os
-    schedule_file = "schedule.json"
+    from pathlib import Path
+
+    from config import project_path
+    # Containment-checked project path (see config.project_path).
+    schedule_file = Path(project_path("schedule.json"))
     
     try:
-        if not os.path.exists(schedule_file):
-            with open(schedule_file, 'w') as f:
-                json.dump([], f)
-                
-        with open(schedule_file, 'r') as f:
-            schedule = json.load(f)
+        if not schedule_file.exists():
+            schedule_file.write_text("[]", encoding="utf-8")
+        schedule = json.loads(schedule_file.read_text(encoding="utf-8"))
             
         action = action.lower()
         if action == "add":
             if not event or not time:
                 return "Error: Must provide both 'event' and 'time' to add to schedule."
             schedule.append({"time": time, "event": event})
-            with open(schedule_file, 'w') as f:
-                json.dump(schedule, f, indent=4)
+            schedule_file.write_text(json.dumps(schedule, indent=4), encoding="utf-8")
             return f"Successfully added '{event}' at {time} to your schedule."
             
         elif action == "clear":
-            with open(schedule_file, 'w') as f:
-                json.dump([], f)
+            schedule_file.write_text("[]", encoding="utf-8")
             return "Schedule has been completely cleared."
             
         elif action == "read" or action == "list":
@@ -197,7 +195,7 @@ def scan_home_network() -> str:
             return "Network scanner is currently only optimized for Windows systems."
             
         # Run ARP -a to get local network devices
-        result = subprocess.check_output("arp -a", shell=True, text=True)
+        result = subprocess.check_output(["arp", "-a"], text=True)
         
         # Parse output for clean response
         lines = result.split('\n')
@@ -227,25 +225,58 @@ def sync_archive() -> str:
     """Creates a secure backup snapshot of the system's active memory and configuration."""
     try:
         import os
+        import json
         import shutil
+        import time
         from datetime import datetime
-        
+
         backup_dir = "backups"
         if not os.path.exists(backup_dir):
             os.makedirs(backup_dir)
-            
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_folder = os.path.join(backup_dir, f"archive_{timestamp}")
         os.makedirs(backup_folder)
-        
-        # Sync critical files
-        files_to_sync = ["memory.json", "schedule.json", ".env"]
-        synced = 0
-        for f in files_to_sync:
-            if os.path.exists(f):
-                shutil.copy2(f, backup_folder)
-                synced += 1
-                
-        return f"Archive Sync complete. Securely backed up {synced} core files to {backup_folder}."
+
+        # JSON stores are rewritten in place by background threads (memory extraction,
+        # goal engine), so a copy can catch a half-written file. Validate the parse
+        # and retry once before reporting the file as skipped.
+        def _copy_json_checked(name):
+            for attempt in range(2):
+                try:
+                    with open(name, 'r', encoding='utf-8') as f:
+                        json.load(f)
+                    shutil.copy2(name, backup_folder)
+                    return True
+                except (json.JSONDecodeError, OSError):
+                    if attempt == 0:
+                        time.sleep(1.0)
+            return False
+
+        def _copy_plain(name):
+            try:
+                shutil.copy2(name, backup_folder)
+                return True
+            except OSError:
+                return False
+
+        files_to_sync = ["memory.json", "ltm_db.json", "goals.json", "schedule.json",
+                         ".env", "plans.json"]
+        backed_up = []
+        skipped = []
+        for name in files_to_sync:
+            if not os.path.exists(name):
+                skipped.append(f"{name} (not created yet)")
+            elif _copy_json_checked(name) if name.endswith(".json") else _copy_plain(name):
+                backed_up.append(name)
+            else:
+                skipped.append(f"{name} (unreadable or mid-write)")
+
+        lines = [f"Archive Sync complete. Backed up {len(backed_up)} file(s) to {backup_folder}."]
+        if backed_up:
+            lines.append("Backed up: " + ", ".join(backed_up))
+        if skipped:
+            lines.append("Skipped: " + "; ".join(skipped))
+        return "\n".join(lines)
     except Exception as e:
         return f"Error syncing archive: {str(e)}"

@@ -3,6 +3,7 @@ import sounddevice as sd
 import scipy.io.wavfile as wav
 import tempfile
 import os
+import subprocess
 import re
 import time
 import uuid
@@ -229,7 +230,7 @@ def _play_mp3(filepath: str):
         pygame.mixer.quit()
     except ImportError:
         # Fallback: Windows media player (silent window)
-        os.system(f'start /min /wait "" "{filepath}"')
+        subprocess.run(["cmd", "/c", "start", "/min", "/wait", "", filepath], check=False)
     finally:
         is_speaking = False
         _mark_speech_end()
@@ -341,7 +342,6 @@ def _get_wakeword_model_path():
     candidates = [
         os.environ.get("AURA_WAKEWORD_MODEL"),
         os.path.join(base_dir, "models", "hey_aura.onnx"),
-        os.path.join(base_dir, "wakeword_training", "official_features", "hey_aura_v6", "hey_aura_v6.onnx"),
         os.path.join(base_dir, "models", "hey_aura.tflite"),
         os.path.join(base_dir, "hey_aura.onnx"),
         os.path.join(base_dir, "hey_aura.tflite"),
@@ -380,6 +380,28 @@ def _resolve_input_device(spec):
 # ──────────── Wake Word Background Listener ────────────
 wakeword_enabled = True
 
+# Detection-layer status, surfaced through /api/wakeword/status. The audio
+# callback runs on the sounddevice thread, so these are plain floats/ints
+# (atomic enough for status reporting; no locking needed).
+wakeword_listening = False          # mic stream open + model ready
+wakeword_model_loaded = False
+wakeword_model_error = None         # last fatal setup error, if any
+wakeword_last_detection_ts = 0.0    # epoch ts of last accepted "Hey Aura"
+wakeword_false_positives = 0        # near-misses today (reset daily)
+_fp_day = ""                        # date string the FP counter is valid for
+
+
+def get_wakeword_status():
+    return {
+        "enabled": wakeword_enabled,
+        "listening": wakeword_listening,
+        "threshold": _env_float("AURA_WAKEWORD_THRESHOLD", 0.6),
+        "last_detection_ts": wakeword_last_detection_ts,
+        "model_loaded": wakeword_model_loaded,
+        "error": wakeword_model_error,
+        "false_positives_today": wakeword_false_positives,
+    }
+
 
 def set_wakeword_enabled(enabled: bool):
     """Master switch for the backend 'Hey Aura' listener."""
@@ -398,6 +420,7 @@ def start_wakeword_listener(callback):
 
     def listener_thread():
         import time
+        global wakeword_model_loaded, wakeword_model_error, wakeword_listening
         try:
             # Retry the whole setup (model path + load) so a transient failure
             # - e.g. mic driver not ready at boot - doesn't kill wake word forever.
@@ -408,6 +431,7 @@ def start_wakeword_listener(callback):
                 try:
                     model_path = _get_wakeword_model_path()
                     if not model_path:
+                        wakeword_model_error = 'model not found in models/ directory'
                         print(f'[WAKE WORD] Attempt {attempt}/{max_setup_attempts}: "hey_aura" model not found in models/ directory.')
                         time.sleep(5)
                         continue
@@ -421,11 +445,15 @@ def start_wakeword_listener(callback):
 
                     framework = "onnx" if model_path.lower().endswith(".onnx") else "tflite"
                     owwModel = Model(wakeword_models=[model_path], inference_framework=framework)
+                    wakeword_model_loaded = True
+                    wakeword_model_error = None
                     break
                 except ImportError:
+                    wakeword_model_error = 'openwakeword/onnxruntime not installed'
                     print('[WAKE WORD] openwakeword/onnxruntime not installed. Wake word disabled.')
                     return
                 except Exception as e:
+                    wakeword_model_error = f'{type(e).__name__}: {e}'
                     print(f'[WAKE WORD] Setup attempt {attempt}/{max_setup_attempts} failed: {type(e).__name__}: {e}. Retrying in 5s...')
                     time.sleep(5)
 
@@ -464,6 +492,7 @@ def start_wakeword_listener(callback):
 
             def audio_callback(indata, frames, time_info, status):
                 nonlocal last_detect, consec_high
+                global wakeword_last_detection_ts, wakeword_false_positives, _fp_day
                 if not wakeword_enabled:
                     return
                 if status:
@@ -492,6 +521,7 @@ def start_wakeword_listener(callback):
                             return
                         last_detect = now
                         consec_high = 0
+                        wakeword_last_detection_ts = now
                         print(f'[WAKE WORD] Detected {mdl} with score {score:.3f} (threshold {thr})')
                         _log_detection(score, thr, is_speaking)
                         if is_speaking:
@@ -501,6 +531,11 @@ def start_wakeword_listener(callback):
                         owwModel.reset()
                     elif score > thr * 0.85:
                         # near-miss logging: helps diagnose false wakes
+                        today = time.strftime("%Y-%m-%d")
+                        if today != _fp_day:
+                            _fp_day = today
+                            wakeword_false_positives = 0
+                        wakeword_false_positives += 1
                         _log_detection(score, thr, is_speaking, near_miss=True)
 
             # Self-healing stream loop: reopen the mic on errors instead of dying
@@ -508,9 +543,12 @@ def start_wakeword_listener(callback):
                 try:
                     with sd.InputStream(samplerate=RATE, channels=1, blocksize=CHUNK,
                                         dtype='int16', device=device, callback=audio_callback):
+                        wakeword_listening = True
+                        print('[WAKE WORD] Mic stream open — listening.')
                         while True:
                             time.sleep(1)
                 except Exception as e:
+                    wakeword_listening = False
                     print(f'[WAKE WORD] Stream error: {type(e).__name__}: {e}. Reopening mic in 3s...')
                     time.sleep(3)
 

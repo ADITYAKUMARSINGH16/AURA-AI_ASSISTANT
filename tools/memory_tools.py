@@ -1,12 +1,14 @@
 import json
-import os
 import uuid
 import datetime
 import logging
 import threading
+from pathlib import Path
 
-LTM_FILE = "ltm_db.json"
-OLD_LTM_FILE = "long_term_memory.json"
+from config import project_path
+
+# Anchor to the project root (tools/../) so the path never depends on CWD.
+LTM_FILE = Path(project_path("ltm_db.json"))
 
 # Serializes every read-modify-write of ltm_db.json. Without it, background
 # memory extraction, explicit remember/forget calls and HUD deletions can
@@ -16,26 +18,9 @@ _LTM_LOCK = threading.RLock()
 def _load_ltm():
     db = {"semantic": [], "episodic": [], "procedural": []}
 
-    # Migrate old data if needed
-    if os.path.exists(OLD_LTM_FILE):
+    if LTM_FILE.exists():
         try:
-            with open(OLD_LTM_FILE, 'r', encoding='utf-8') as f:
-                old_data = json.load(f)
-                if isinstance(old_data, list):
-                    for item in old_data:
-                        item['layer'] = 'semantic'
-                        item['source_context'] = "Migrated from legacy memory"
-                        db["semantic"].append(item)
-            os.rename(OLD_LTM_FILE, OLD_LTM_FILE + ".bak")
-            _save_ltm(db)
-        except Exception as e:
-            logging.error(f"Failed to migrate legacy memory: {e}")
-
-    if os.path.exists(LTM_FILE):
-        try:
-            with open(LTM_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                db.update(data)
+            db.update(json.loads(LTM_FILE.read_text(encoding='utf-8')))
         except Exception as e:
             logging.error(f"Failed to load memory DB: {e}")
 
@@ -43,8 +28,7 @@ def _load_ltm():
 
 def _save_ltm(data):
     try:
-        with open(LTM_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
+        LTM_FILE.write_text(json.dumps(data, indent=4), encoding='utf-8')
     except Exception as e:
         logging.error(f"Error saving LTM: {e}")
 

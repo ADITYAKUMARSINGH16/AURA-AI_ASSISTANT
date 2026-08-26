@@ -1,0 +1,38 @@
+{
+    "plans": [
+        {
+            "id": "49db3724830c",
+            "goal": "System review",
+            "steps": [
+                {
+                    "index": 1,
+                    "text": "scan system",
+                    "status": "pending",
+                    "note": ""
+                },
+                {
+                    "index": 2,
+                    "text": "list processes",
+                    "status": "pending",
+                    "note": ""
+                },
+                {
+                    "index": 3,
+                    "text": "analyze results",
+                    "status": "pending",
+                    "note": ""
+                },
+                {
+                    "index": 4,
+                    "text": "write summary",
+                    "status": "pending",
+                    "note": ""
+                }
+            ],
+            "current_step": 1,
+            "created_at": "2026-08-26T00:07:50.032839",
+            "updated_at": "2026-08-26T00:15:52.891060",
+            "status": "cancelled"
+        }
+    ]
+}

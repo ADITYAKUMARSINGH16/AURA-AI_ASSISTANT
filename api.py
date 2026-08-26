@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
 import warnings
 
@@ -9,11 +9,45 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 import psutil
+import logging
+import os
 
 from agent import create_agent
 from voice import speak, listen, generate_tts_file, start_wakeword_listener
 
-app = FastAPI(title="AURA API")
+import asyncio
+import hashlib
+import json as _json
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from media_info import get_now_playing
+
+from backend.event_bus import bus, format_sse, publish_now
+import backend.event_bus as event_bus
+
+
+async def lifespan(app):
+    """Start/stop the SSE change-detectors with the server lifecycle."""
+    event_bus.bind_loop(asyncio.get_running_loop())
+    detectors = [
+        # refresh_after ≈ 3x cadence: lets clients treat silence as staleness.
+        asyncio.create_task(_detect_loop("telemetry", 3, collect_telemetry_data, refresh_after=10)),
+        asyncio.create_task(_detect_loop("threats_update", 10, collect_threats_data, refresh_after=30)),
+        asyncio.create_task(_detect_loop("permissions_update", 3, collect_permissions_data, refresh_after=10)),
+        asyncio.create_task(_notifications_detector()),
+        asyncio.create_task(_detect_loop("logs_append", 10, collect_logs_data, refresh_after=30)),
+        asyncio.create_task(_detect_loop("schedule_update", 30, collect_schedule_data, refresh_after=90)),
+        asyncio.create_task(_detect_loop("processes_update", 5, collect_processes_data, refresh_after=15)),
+        asyncio.create_task(_detect_loop("security_update", 30, collect_security_data, refresh_after=90)),
+        asyncio.create_task(_media_detector()),
+    ]
+    yield
+    for task in detectors:
+        task.cancel()
+
+
+app = FastAPI(title="AURA API", lifespan=lifespan)
 
 import threading
 import time
@@ -24,6 +58,18 @@ agent_lock = threading.Lock()
 
 from notifications import push_notification
 import queue as _queue
+
+# Data files live in the project root. Every path is normalized and verified
+# to stay inside that directory, so a crafted name can never escape it.
+_PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+
+def _safe_data_path(name: str) -> str:
+    path = os.path.normpath(os.path.join(_PROJECT_ROOT, name))
+    if not path.startswith(_PROJECT_ROOT + os.sep):
+        raise ValueError(f"path escapes project root: {name!r}")
+    return path
+
+PROACTIVE_CONFIG_FILE = _safe_data_path("proactive_config.json")
 
 # Timestamps paired 1:1 with queued wake-word signals (FIFO, same order).
 _wake_signal_times = _queue.Queue()
@@ -54,8 +100,7 @@ async def get_history():
     history = [msg for msg in agent.messages if msg.get("role") in ("user", "assistant")]
     return history  # Return as a plain JSON array
 
-@app.get("/api/logs")
-async def get_logs():
+def _logs_payload():
     import os
     log_file = "aura_agent.log"
     if not os.path.exists(log_file):
@@ -68,8 +113,14 @@ async def get_logs():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/telemetry")
-async def get_telemetry():
+async def collect_logs_data():
+    return _logs_payload()
+
+@app.get("/api/logs")
+async def get_logs():
+    return await collect_logs_data()
+
+def _telemetry_payload():
     cpu = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory().percent
     
@@ -81,7 +132,7 @@ async def get_telemetry():
     try:
         import subprocess
         import re
-        result = subprocess.check_output("netsh wlan show interfaces", shell=True, text=True, stderr=subprocess.DEVNULL)
+        result = subprocess.check_output(["netsh", "wlan", "show", "interfaces"], text=True, stderr=subprocess.DEVNULL)
         match = re.search(r"Signal\s*:\s*(\d+)%", result)
         if match:
             uplink = int(match.group(1))
@@ -110,8 +161,8 @@ async def get_telemetry():
     gpu_fan = "N/A"
     try:
         gpu_result = subprocess.check_output(
-            "nvidia-smi --query-gpu=temperature.gpu,memory.used,memory.total,fan.speed --format=csv,noheader,nounits",
-            shell=True, text=True, stderr=subprocess.DEVNULL
+            ["nvidia-smi", "--query-gpu=temperature.gpu,memory.used,memory.total,fan.speed", "--format=csv,noheader,nounits"],
+            text=True, stderr=subprocess.DEVNULL
         )
         parts = [p.strip() for p in gpu_result.split(',')]
         if len(parts) >= 4:
@@ -160,6 +211,15 @@ async def get_telemetry():
         }
     }
 
+async def collect_telemetry_data():
+    # netsh/WMI/nvidia-smi block for tens of ms; keep them off the event loop
+    # so the SSE bus and other requests stay responsive.
+    return await asyncio.to_thread(_telemetry_payload)
+
+@app.get("/api/telemetry")
+async def get_telemetry():
+    return await collect_telemetry_data()
+
 @app.post("/api/chat")
 def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     # Runs as a sync handler (threadpool) because agent.send_message blocks for a long time.
@@ -172,6 +232,27 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         
     return {"status": "success", "response": response_text}
 
+@app.post("/api/chat/stream")
+async def chat_stream_endpoint(req: ChatRequest):
+    """SSE transport over the same pipeline as /api/chat.
+
+    Emits meta/token/tool_start/tool_result/permission_request/done events; any
+    pipeline error becomes an error event before the stream closes.
+    """
+    async def event_source():
+        try:
+            async for event in agent.chat_stream(req.message, images=req.images, file_texts=req.file_texts):
+                yield f"data: {_json.dumps(event, default=str)}\n\n"
+        except Exception as e:
+            logging.error(f"/api/chat/stream failed: {e}")
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
 @app.get("/api/captures/last_screen")
 async def get_last_screen():
     """Serves the last screen capture from outside the web-served static directory."""
@@ -181,8 +262,7 @@ async def get_last_screen():
         return FileResponse(path, media_type="image/png")
     return {"status": "error", "message": "No screen capture available yet."}
 
-@app.get("/api/permissions/pending")
-async def get_pending_permissions():
+def _permissions_payload():
     from permissions import get_pending_actions, TRUSTED_AUTOMATION_ENABLED
     return {
         "status": "success",
@@ -190,16 +270,27 @@ async def get_pending_permissions():
         "trusted_automation": TRUSTED_AUTOMATION_ENABLED
     }
 
+async def collect_permissions_data():
+    return _permissions_payload()
+
+@app.get("/api/permissions/pending")
+async def get_pending_permissions():
+    return await collect_permissions_data()
+
 @app.post("/api/permissions/confirm/{action_id}")
 async def confirm_permission(action_id: str):
     from permissions import confirm_pending_action
     result = confirm_pending_action(action_id)
+    # Push immediately so the HUD clears the card without waiting for the
+    # next detector sweep.
+    await bus.publish("permissions_update", await collect_permissions_data())
     return {"status": "success", "message": result}
 
 @app.post("/api/permissions/reject/{action_id}")
 async def reject_permission(action_id: str):
     from permissions import reject_pending_action
     result = reject_pending_action(action_id)
+    await bus.publish("permissions_update", await collect_permissions_data())
     return {"status": "success", "message": result}
 
 @app.post("/api/permissions/trusted_mode")
@@ -208,6 +299,7 @@ async def set_trusted_mode(req: Request):
     enabled = data.get("enabled", False)
     from permissions import toggle_trusted_automation
     toggle_trusted_automation(enabled)
+    await bus.publish("permissions_update", await collect_permissions_data())
     return {"status": "success", "enabled": enabled}
 
 @app.get("/api/tts")
@@ -282,12 +374,15 @@ class WakeWordStatus(BaseModel):
 async def toggle_wakeword(req: WakeWordStatus):
     import voice
     voice.set_wakeword_enabled(req.enabled)
+    status = voice.get_wakeword_status()
+    # Broadcast so every open HUD flips its Settings chip without polling.
+    await bus.publish("wakeword_status", status)
     return {"status": "success", "enabled": req.enabled}
 
 @app.get("/api/wakeword/status")
 async def wakeword_status():
     import voice
-    return {"enabled": voice.wakeword_enabled}
+    return voice.get_wakeword_status()
 
 
 @app.post("/api/voice/wake_and_listen")
@@ -341,8 +436,7 @@ class ScheduleEvent(BaseModel):
     time: str
     event: str
 
-@app.get("/api/schedule")
-async def get_schedule():
+def _schedule_payload():
     import json
     import os
     schedule_file = "schedule.json"
@@ -354,11 +448,19 @@ async def get_schedule():
     except Exception:
         return []
 
+async def collect_schedule_data():
+    return _schedule_payload()
+
+@app.get("/api/schedule")
+async def get_schedule():
+    return await collect_schedule_data()
+
 @app.post("/api/schedule")
 async def add_schedule(event: ScheduleEvent):
     from tools.system_tools import manage_schedule
     result = manage_schedule("add", event=event.event, time=event.time)
     if "Successfully added" in result:
+        await bus.publish("schedule_update", await collect_schedule_data())
         return {"status": "success", "message": result}
     return {"status": "error", "message": result}
 
@@ -405,8 +507,8 @@ async def update_proactive(req: ProactiveConfigUpdate):
         "cooldown_iterations": 30,
         "thresholds": req.thresholds
     }
-    with open("proactive_config.json", 'w') as f:
-        json.dump(config, f, indent=4)
+    # Containment-checked project path (see _safe_data_path above).
+    Path(PROACTIVE_CONFIG_FILE).write_text(json.dumps(config, indent=4), encoding="utf-8")
     return {"status": "success"}
 
 
@@ -419,7 +521,7 @@ async def network_scan():
         if platform.system().lower() != "windows":
             return {"status": "error", "message": "Network scanner is currently only optimized for Windows systems."}
             
-        result = subprocess.check_output("arp -a", shell=True, text=True)
+        result = subprocess.check_output(["arp", "-a"], text=True)
         lines = result.split('\n')
         devices = []
         for line in lines:
@@ -434,8 +536,7 @@ async def network_scan():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/processes")
-async def get_processes():
+def _processes_payload():
     procs = []
     for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
         try:
@@ -448,6 +549,14 @@ async def get_processes():
         except: pass
     procs.sort(key=lambda x: x['cpu'], reverse=True)
     return {"processes": procs[:20]}
+
+async def collect_processes_data():
+    # Iterating every process is the heaviest poll on the bus; run it in a worker thread.
+    return await asyncio.to_thread(_processes_payload)
+
+@app.get("/api/processes")
+async def get_processes():
+    return await collect_processes_data()
 
 class ProcessKillRequest(BaseModel):
     pid: int
@@ -478,33 +587,161 @@ async def kill_process(req: ProcessKillRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/threats")
-async def get_threats():
+def _threats_payload():
     try:
         import win32evtlog
         server = 'localhost'
         logtype = 'Security'
         flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         hand = win32evtlog.OpenEventLog(server, logtype)
-        
+
         events = win32evtlog.ReadEventLog(hand, flags, 0)
         failed_logins = 0
-        
+
         if events:
             for event in events[:100]:
                 if event.EventID == 4625:
                     failed_logins += 1
-                    
+
         win32evtlog.CloseEventLog(hand)
-        
+
         if failed_logins > 0:
             return {"status": "ELEVATED", "count": failed_logins, "message": f"{failed_logins} failed logins."}
         else:
             return {"status": "CLEAR", "count": 0, "message": "No anomalies detected."}
     except Exception as e:
         return {"status": "ERROR", "count": 0, "message": f"Log read failed."}
-@app.get("/api/security")
-async def get_security():
+
+async def collect_threats_data():
+    # win32evtlog reads block; keep them off the event loop.
+    return await asyncio.to_thread(_threats_payload)
+
+@app.get("/api/threats")
+async def get_threats():
+    return await collect_threats_data()
+
+
+# ----------------------------- SSE EVENT BUS -----------------------------
+
+def _fingerprint(data) -> str:
+    return hashlib.sha256(_json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+async def _detect_loop(event_type: str, interval: int, collector, refresh_after: int = None):
+    """Poll a shared collector and publish when the payload changes.
+
+    refresh_after (seconds): even an UNCHANGED payload is republished after this
+    much silence, so clients can treat a missing channel as a liveness/staleness
+    signal rather than "nothing happened".
+    """
+    last = None
+    last_pub = 0.0
+    while True:
+        try:
+            data = await collector()
+            fp = _fingerprint(data)
+            expired = refresh_after is not None and (time.time() - last_pub) > refresh_after
+            if fp != last or last_pub == 0 or expired:
+                # The first sample is published too, so a newly connected HUD
+                # receives current state within one interval without polling.
+                await bus.publish(event_type, data)
+                last = fp
+                last_pub = time.time()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass  # A failed sweep must never kill the detector.
+        await asyncio.sleep(interval)
+
+async def _media_detector():
+    """Publish media state only when track/identity changes (not every second
+    with the playhead); HUD interpolates progress locally between events."""
+    last = None
+    while True:
+        try:
+            data = await get_now_playing()
+            fp = _fingerprint({k: data.get(k) for k in
+                               ("available", "playing", "title", "artist",
+                                "album", "app", "duration_s")})
+            if fp != last:
+                await bus.publish("media_update", data)
+                last = fp
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        await asyncio.sleep(3)
+
+async def _notifications_detector():
+    """Publishes empty->non-empty transitions WITHOUT consuming the queue.
+
+    pop_notification() is destructive and GET /api/notifications remains the
+    single consumer during the frontend migration; this detector only peeks so
+    both transports stay consistent. Re-published every ~10s as a liveness tick.
+    """
+    last_available = None
+    last_pub = 0.0
+    while True:
+        try:
+            import notifications as _notifications
+            with _notifications._lock:
+                available = len(_notifications.pending_notifications) > 0
+            if available != last_available or (time.time() - last_pub) > 10:
+                await bus.publish("notifications_update", {"available": available})
+                last_available = available
+                last_pub = time.time()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        await asyncio.sleep(3)
+
+@app.get("/api/events")
+async def sse_events():
+    import os
+    # Comment-ping cadence; configurable so deployments behind aggressive
+    # proxy idle timeouts can shorten it.
+    try:
+        heartbeat = float(os.environ.get("AURA_SSE_HEARTBEAT", "15"))
+    except ValueError:
+        heartbeat = 15.0
+    q = bus.subscribe()
+
+    async def stream():
+        try:
+            hello = {
+                "type": "hello",
+                "data": {"server": "AURA API", "clients": bus.client_count},
+                "ts": time.time()
+            }
+            yield format_sse(hello)
+            last_output = time.time()
+            while True:
+                # Guarantee at least one write (event or ping) per heartbeat
+                # window so proxies/clients can detect a dead link.
+                timeout = heartbeat - (time.time() - last_output)
+                if timeout <= 0:
+                    yield ": ping\n\n"
+                    last_output = time.time()
+                    continue
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=timeout)
+                    yield format_sse(event)
+                    last_output = time.time()
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    last_output = time.time()
+        finally:
+            # Runs on client disconnect or generator close: always unsubscribe.
+            bus.unsubscribe(q)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+# --------------------------------------------------------------------------
+def _security_payload():
     from tools.security_tools import get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes
     try:
         defender = get_windows_defender_status()
@@ -513,7 +750,7 @@ async def get_security():
         files = get_suspicious_files()
         processes = analyze_suspicious_processes()
         devices = get_removable_devices()
-        
+
         # Calculate simplistic risk level based on keywords
         alerts = []
         if "DISABLED" in defender:
@@ -522,11 +759,11 @@ async def get_security():
             alerts.append("Suspicious processes detected.")
         if "Suspicious/Recent Executables Found" in files:
             alerts.append("Recent executables found in drop locations.")
-            
+
         risk_level = "HIGH" if alerts else "LOW"
         if risk_level == "LOW" and ("DISABLED" in firewall or "No active listening ports" not in ports):
             risk_level = "MEDIUM"
-            
+
         return {
             "status": "success",
             "risk_level": risk_level,
@@ -541,6 +778,60 @@ async def get_security():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+async def collect_security_data():
+    # PowerShell-based checks block for hundreds of ms; run off the event loop.
+    return await asyncio.to_thread(_security_payload)
+
+@app.get("/api/security")
+async def get_security():
+    return await collect_security_data()
+
+
+@app.get("/api/plans/active")
+async def get_active_plan():
+    import planner_state
+    return {"status": "success", "plan": planner_state.get_active_plan()}
+
+@app.get("/api/plans")
+async def get_recent_plans():
+    import planner_state
+    return {"status": "success", "plans": planner_state.list_plans(10)}
+
+@app.post("/api/plans/{plan_id}/cancel")
+async def cancel_plan_endpoint(plan_id: str):
+    import planner_state
+    result = planner_state.cancel_plan(plan_id)
+    if result is None:
+        return {"status": "error", "message": "Plan not found."}
+    return {"status": "success"}
+
+@app.get("/api/media")
+async def get_media():
+    """Now-playing snapshot. Always 200; degrades to available:false without winsdk."""
+    try:
+        return await get_now_playing()
+    except Exception as e:
+        return {"available": False, "reason": str(e), "playing": False,
+                "title": None, "artist": None, "album": None, "album_art": None,
+                "app": None, "position_s": None, "duration_s": None}
+
+@app.post("/api/media/control")
+async def control_media_endpoint(req: Request):
+    """Direct transport control (playpause/next/previous) — no LLM in the loop."""
+    try:
+        data = await req.json()
+        action = data.get("action")
+        # control_media spells it 'play_pause'; the HUD sends the compact form.
+        if action == "playpause":
+            action = "play_pause"
+        if action not in ("play_pause", "play", "pause", "next", "previous"):
+            return {"status": "error", "message": f"Invalid action '{action}'."}
+        from tools.system_tools import control_media
+        result = control_media(action)
+        ok = result.startswith("Successfully")
+        return {"status": "success" if ok else "error", "message": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/fs")
 async def get_fs(path: str = ""):
@@ -577,7 +868,7 @@ from datetime import datetime
 def load_proactive_config():
     import json
     import os
-    config_file = "proactive_config.json"
+    config_file = Path(PROACTIVE_CONFIG_FILE)
     default_config = {
         "enabled": True,
         "cooldown_iterations": 30,
@@ -590,14 +881,12 @@ def load_proactive_config():
             "battery_percent_low": 20
         }
     }
-    if not os.path.exists(config_file):
-        with open(config_file, 'w') as f:
-            json.dump(default_config, f, indent=4)
+    if not config_file.exists():
+        config_file.write_text(json.dumps(default_config, indent=4), encoding="utf-8")
         return default_config
     try:
-        with open(config_file, 'r') as f:
-            return json.load(f)
-    except:
+        return json.loads(config_file.read_text(encoding="utf-8"))
+    except Exception:
         return default_config
 
 def get_top_process():
@@ -705,8 +994,8 @@ def run_schedule():
                 try:
                     import subprocess
                     gpu_result = subprocess.check_output(
-                        "nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits",
-                        shell=True, text=True, stderr=subprocess.DEVNULL
+                        ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+                        text=True, stderr=subprocess.DEVNULL
                     )
                     gpu_temp = int(gpu_result.strip())
                     if gpu_temp > thresh.get("gpu_temp_c", 85):
@@ -851,6 +1140,17 @@ scheduler_thread.start()
 # Mount static files to serve the frontend
 import os
 os.makedirs("static", exist_ok=True)
+
+# The HUD is the application — serve it at root. The marketing page moves
+# to /welcome. Registered BEFORE the StaticFiles mount so they win.
+@app.get("/", include_in_schema=False)
+async def serve_hud_root():
+    return FileResponse("static/hud.html")
+
+@app.get("/welcome", include_in_schema=False)
+async def serve_welcome():
+    return FileResponse("static/welcome.html")
+
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":

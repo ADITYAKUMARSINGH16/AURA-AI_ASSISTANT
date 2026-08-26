@@ -3,6 +3,17 @@ import sys
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
+
+
+def _verified_url(url: str, allowed_hosts: set) -> str:
+    """SSRF guard: only http(s) against an explicit host allowlist."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Blocked URL scheme: {parsed.scheme!r}")
+    if parsed.hostname not in allowed_hosts:
+        raise ValueError(f"Blocked URL host: {parsed.hostname!r}")
+    return url
 import platform
 
 def run_aura_diagnostics() -> str:
@@ -28,7 +39,8 @@ def run_aura_diagnostics() -> str:
     # 2. OLLAMA
     ollama_models = []
     try:
-        req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+        req = urllib.request.Request(
+            _verified_url("http://127.0.0.1:11434/api/tags", {"127.0.0.1"}))
         with urllib.request.urlopen(req, timeout=3) as response:
             data = json.loads(response.read().decode())
             ollama_models = [m.get("name") for m in data.get("models", [])]
@@ -61,8 +73,8 @@ def run_aura_diagnostics() -> str:
     import subprocess
     try:
         gpu_result = subprocess.check_output(
-            "nvidia-smi --query-gpu=memory.total,memory.used --format=csv,noheader,nounits",
-            shell=True, text=True, stderr=subprocess.DEVNULL
+            ["nvidia-smi", "--query-gpu=memory.total,memory.used", "--format=csv,noheader,nounits"],
+            text=True, stderr=subprocess.DEVNULL
         ).strip()
         if gpu_result:
             parts = gpu_result.split(',')
@@ -134,7 +146,8 @@ def run_aura_diagnostics() -> str:
         # 8.8.8.8 is DNS-only and serves no HTTP, so the old check always
         # timed out even with a healthy connection. generate_204 returns an
         # empty 200/204 response specifically for connectivity probes.
-        req = urllib.request.Request("http://www.gstatic.com/generate_204")
+        req = urllib.request.Request(
+            _verified_url("http://www.gstatic.com/generate_204", {"www.gstatic.com"}))
         urllib.request.urlopen(req, timeout=4)
         add_result("NETWORK", "PASS", "Internet uplink is active.")
     except Exception:

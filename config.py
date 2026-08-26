@@ -1,7 +1,24 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Root of the project (config.py always lives at the top level).
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def project_path(*parts: str) -> str:
+    """Absolute path for a fixed project resource, containment-checked.
+
+    Every file read/write below must target a known filename inside the
+    project tree; resolving against PROJECT_ROOT and asserting membership
+    guarantees a constructed path can never escape it via '..' segments.
+    """
+    p = (PROJECT_ROOT.joinpath(*parts)).resolve()
+    if p != PROJECT_ROOT and PROJECT_ROOT not in p.parents:
+        raise ValueError(f"Path escapes project root: {p}")
+    return str(p)
 
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
 OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL")

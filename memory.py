@@ -1,17 +1,19 @@
 import json
-import os
+from pathlib import Path
 
-MEMORY_FILE = "memory.json"
+from config import project_path
+
+# Anchor to the project root so the path never depends on the server's CWD.
+MEMORY_FILE = project_path("memory.json")
 MAX_MESSAGES = 20
 INTACT_MESSAGES = 6  # Keep the last 6 messages completely intact (including tools)
 
 def load_memory():
     """Loads the conversation history from the JSON file."""
-    if os.path.exists(MEMORY_FILE):
+    mem_path = Path(MEMORY_FILE)
+    if mem_path.exists():
         try:
-            with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
-                messages = json.load(f)
-                return messages
+            return json.loads(mem_path.read_text(encoding='utf-8'))
         except Exception as e:
             print(f"Warning: Could not load memory ({e}). Starting fresh.")
             return []
@@ -60,8 +62,7 @@ def save_memory(messages):
     messages[:] = final_messages
     
     try:
-        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(final_messages, f, indent=4)
+        Path(MEMORY_FILE).write_text(json.dumps(final_messages, indent=4), encoding='utf-8')
     except Exception as e:
         print(f"Warning: Could not save memory ({e}).")
         
