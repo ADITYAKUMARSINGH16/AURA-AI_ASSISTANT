@@ -198,6 +198,7 @@ function showView(name) {
     // Bus events for hidden views are intentionally dropped; on activation,
     // pull one fresh snapshot immediately instead of waiting for the next tick.
     if (name === 'system') { fetchProcesses(); fetchLogs(); }
+    if (name === 'settings') { initQuickActionsEditor(); }
     // In drawer mode (≤820px), choosing a destination closes the drawer.
     if (window.matchMedia('(max-width: 820px)').matches) setDrawer(false);
 }
@@ -1205,6 +1206,256 @@ async function fetchThreats() {
 // ═══════════════════════════════════════════════════════════
 // QUICK ACTIONS & MEDIA
 // ═══════════════════════════════════════════════════════════
+
+// Icon SVG map — keys match icon names in config/quick_actions.json
+const QUICK_ACTION_ICONS = {
+    eye: '<svg viewBox="0 0 24 24"><path d="M2 12h20M12 2v20M5 5l14 14M19 5L5 19"/></svg>',
+    lock: '<svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+    globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>',
+    shield: '<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    bolt: '<svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-10h-9l1-8z"/></svg>',
+};
+
+async function loadQuickActions() {
+    try {
+        const res = await api('/api/config/ui', { timeout: 8000 });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.quick_actions)) {
+                return data.quick_actions;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load quick actions from server, using defaults:', e);
+    }
+    // Fallback defaults (must match server defaults)
+    return [
+        {id: 'screen', label: 'Read Screen', icon: 'eye', prompt: 'read my screen and describe what you see', danger: false},
+        {id: 'lock', label: 'Lock', icon: 'lock', prompt: 'lock the system', danger: true},
+        {id: 'web', label: 'Web', icon: 'globe', prompt: 'search the web for the latest news', danger: false},
+        {id: 'scan', label: 'Scan', icon: 'shield', prompt: 'run a basic threat scan on the system', danger: false},
+    ];
+}
+
+function getIconSvg(iconName) {
+    return QUICK_ACTION_ICONS[iconName] || QUICK_ACTION_ICONS.bolt;
+}
+
+function renderQuickActions(actions) {
+    const container = document.querySelector('.quick-actions');
+    if (!container) return;
+    container.innerHTML = '';
+    actions.forEach(action => {
+        const btn = document.createElement('button');
+        btn.className = 'qa-btn' + (action.danger ? ' danger' : '');
+        btn.dataset.actionId = action.id;
+        btn.title = action.label;
+        btn.innerHTML = getIconSvg(action.icon) + '<span>' + action.label + '</span>';
+        btn.addEventListener('click', () => {
+            if (action.danger) {
+                confirmAction({
+                    title: 'Confirm ' + action.label,
+                    message: 'This will execute: ' + action.prompt,
+                    okLabel: action.label.toUpperCase(),
+                }).then(confirmed => {
+                    if (confirmed) handleFluentCommand(action.prompt);
+                });
+            } else {
+                handleFluentCommand(action.prompt);
+            }
+        });
+        container.appendChild(btn);
+    });
+    // Re-apply ripple effect to new buttons
+    container.querySelectorAll('.qa-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            let ripple = document.createElement('span');
+            ripple.className = 'ripple';
+            this.appendChild(ripple);
+            let rect = this.getBoundingClientRect();
+            let size = Math.max(rect.width, rect.height);
+            ripple.style.width = ripple.style.height = size + 'px';
+            ripple.style.left = e.clientX - rect.left - size/2 + 'px';
+            ripple.style.top = e.clientY - rect.top - size/2 + 'px';
+            setTimeout(() => ripple.remove(), 600);
+        });
+    });
+}
+
+// Initialize quick actions on boot
+async function initQuickActions() {
+    const actions = await loadQuickActions();
+    renderQuickActions(actions);
+}
+
+// Defer until DOM is ready; called from DOMContentLoaded handler below
+document.addEventListener('DOMContentLoaded', () => {
+    initQuickActions();
+});
+
+// ═══════════════════════════════════════════════════════════════
+// QUICK ACTIONS SETTINGS EDITOR
+// ═══════════════════════════════════════════════════════════════
+
+let quickActionsCache = [];
+
+function renderQuickActionsEditor(actions) {
+    quickActionsCache = actions;
+    const container = document.getElementById('quick-actions-editor');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    actions.forEach((action, idx) => {
+        const row = document.createElement('div');
+        row.className = 'qa-editor-row';
+        row.dataset.idx = idx;
+        row.innerHTML = `
+            <input type="hidden" class="qa-idx" value="${idx}">
+            <input type="text" class="qa-label" value="${escapeHtml(action.label)}" placeholder="Label" aria-label="Action label">
+            <input type="text" class="qa-prompt" value="${escapeHtml(action.prompt)}" placeholder="Prompt" aria-label="Action prompt" style="flex: 1;">
+            <input type="text" class="qa-icon" value="${escapeHtml(action.icon)}" placeholder="Icon" aria-label="Icon name" style="width: 80px;">
+            <label class="qa-danger-wrap">
+                <input type="checkbox" class="qa-danger" ${action.danger ? 'checked' : ''} aria-label="Dangerous action">
+                <span class="qa-danger-label">Danger</span>
+            </label>
+            <button type="button" class="qa-btn compact qa-delete" aria-label="Delete action">✕</button>
+        `;
+        container.appendChild(row);
+    });
+    
+    // Bind delete buttons
+    container.querySelectorAll('.qa-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const row = e.target.closest('.qa-editor-row');
+            const idx = parseInt(row.dataset.idx, 10);
+            quickActionsCache.splice(idx, 1);
+            renderQuickActionsEditor(quickActionsCache);
+        });
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function loadQuickActionsEditor() {
+    try {
+        const res = await api('/api/config/ui', { timeout: 8000 });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.quick_actions)) {
+                renderQuickActionsEditor(data.quick_actions);
+                return;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load quick actions for editor:', e);
+    }
+    // Fallback to defaults
+    const defaults = [
+        {id: 'screen', label: 'Read Screen', icon: 'eye', prompt: 'read my screen and describe what you see', danger: false},
+        {id: 'lock', label: 'Lock', icon: 'lock', prompt: 'lock the system', danger: true},
+        {id: 'web', label: 'Web', icon: 'globe', prompt: 'search the web for the latest news', danger: false},
+        {id: 'scan', label: 'Scan', icon: 'shield', prompt: 'run a basic threat scan on the system', danger: false},
+    ];
+    renderQuickActionsEditor(defaults);
+}
+
+async function saveQuickActions() {
+    const container = document.getElementById('quick-actions-editor');
+    if (!container) return;
+    
+    const rows = container.querySelectorAll('.qa-editor-row');
+    const actions = [];
+    
+    for (const row of rows) {
+        const label = row.querySelector('.qa-label').value.trim();
+        const prompt = row.querySelector('.qa-prompt').value.trim();
+        const icon = row.querySelector('.qa-icon').value.trim() || 'bolt';
+        const danger = row.querySelector('.qa-danger').checked;
+        
+        if (!label || !prompt) {
+            showToast('INVALID', 'Label and prompt are required for all actions', 'error');
+            return;
+        }
+        
+        actions.push({
+            id: 'action-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+            label: label,
+            icon: icon,
+            prompt: prompt,
+            danger: danger,
+        });
+    }
+    
+    if (actions.length > 12) {
+        showToast('TOO MANY', 'Maximum 12 actions allowed', 'error');
+        return;
+    }
+    
+    try {
+        const res = await api('/api/config/ui', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actions }),
+            timeout: 10000
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast('SAVED', 'Quick actions updated', 'success');
+            // Reload chips in chat view
+            const fresh = await loadQuickActions();
+            renderQuickActions(fresh);
+        } else {
+            showToast('ERROR', data.message || 'Save failed', 'error');
+        }
+    } catch (e) {
+        console.error('Save quick actions failed:', e);
+        showToast('ERROR', 'Failed to save: ' + e.message, 'error');
+    }
+}
+
+// Bind add/save buttons when Settings view is shown
+function bindQuickActionsEditorButtons() {
+    document.getElementById('btn-add-quick-action')?.addEventListener('click', () => {
+        const container = document.getElementById('quick-actions-editor');
+        if (!container) return;
+        const idx = quickActionsCache.length;
+        const row = document.createElement('div');
+        row.className = 'qa-editor-row';
+        row.dataset.idx = idx;
+        row.innerHTML = `
+            <input type="hidden" class="qa-idx" value="${idx}">
+            <input type="text" class="qa-label" value="" placeholder="Label" aria-label="Action label">
+            <input type="text" class="qa-prompt" value="" placeholder="Prompt" aria-label="Action prompt" style="flex: 1;">
+            <input type="text" class="qa-icon" value="bolt" placeholder="Icon" aria-label="Icon name" style="width: 80px;">
+            <label class="qa-danger-wrap">
+                <input type="checkbox" class="qa-danger" aria-label="Dangerous action">
+                <span class="qa-danger-label">Danger</span>
+            </label>
+            <button type="button" class="qa-btn compact qa-delete" aria-label="Delete action">✕</button>
+        `;
+        container.appendChild(row);
+        // Bind delete for new row
+        row.querySelector('.qa-delete').addEventListener('click', (e) => {
+            const r = e.target.closest('.qa-editor-row');
+            const i = parseInt(r.dataset.idx, 10);
+            quickActionsCache.splice(i, 1);
+            renderQuickActionsEditor(quickActionsCache);
+        });
+    });
+    
+    document.getElementById('btn-save-quick-actions')?.addEventListener('click', saveQuickActions);
+}
+
+// Call this when Settings view becomes active
+function initQuickActionsEditor() {
+    loadQuickActionsEditor();
+    bindQuickActionsEditorButtons();
+}
+
 async function refreshScreenPreview() {
     try {
         const res = await api(`/api/captures/last_screen?t=${Date.now()}`, { method: 'HEAD' });
@@ -1258,11 +1509,6 @@ async function handleFluentCommand(command) {
         await appendToTerminal('CONNECTION FAILED', 'error');
     }
 }
-
-document.getElementById('qa-read-screen')?.addEventListener('click', () => handleFluentCommand('read my screen'));
-document.getElementById('qa-lock')?.addEventListener('click', () => handleFluentCommand('lock the system'));
-document.getElementById('qa-web')?.addEventListener('click', () => handleFluentCommand('search the web for the latest news'));
-document.getElementById('qa-scan')?.addEventListener('click', () => handleFluentCommand('run a basic threat scan on the system'));
 
 // Media Control bindings — direct transport control, no LLM in the loop.
 document.getElementById('sp-prev')?.addEventListener('click', () => sendMediaControl('previous'));

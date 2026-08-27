@@ -333,6 +333,63 @@ img { max-width: 100%; }
     padding: var(--space-4);
 }
 
+/* ═══════════════ QUICK ACTIONS EDITOR ═══════════════ */
+.quick-actions-panel .qa-editor-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    margin-bottom: var(--space-2);
+}
+
+.quick-actions-panel .qa-editor-row input[type="text"],
+.quick-actions-panel .qa-editor-row input[type="hidden"] {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+}
+
+.quick-actions-panel .qa-label { min-width: 100px; }
+.quick-actions-panel .qa-prompt { flex: 1; min-width: 200px; }
+.quick-actions-panel .qa-icon { min-width: 80px; }
+
+.qa-danger-wrap {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.qa-danger-wrap input[type="checkbox"] {
+    accent-color: var(--danger);
+    width: 14px;
+    height: 14px;
+}
+
+.quick-actions-panel .qa-delete {
+    color: var(--danger);
+    background: transparent;
+    border: 1px solid var(--danger);
+}
+
+.quick-actions-panel .qa-delete:hover {
+    background: var(--danger);
+    color: var(--bg-primary);
+}
+
+#btn-add-quick-action {
+    margin-top: var(--space-3);
+}
+
 /* ═══════════════ BUTTONS ═══════════════ */
 .qa-btn {
     display: inline-flex;

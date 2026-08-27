@@ -1,0 +1,30 @@
+[
+  {
+    "id": "screen",
+    "label": "Read Screen",
+    "icon": "eye",
+    "prompt": "read my screen and describe what you see",
+    "danger": false
+  },
+  {
+    "id": "lock",
+    "label": "Lock",
+    "icon": "lock",
+    "prompt": "lock the system",
+    "danger": true
+  },
+  {
+    "id": "web",
+    "label": "Web",
+    "icon": "globe",
+    "prompt": "search the web for the latest news",
+    "danger": false
+  },
+  {
+    "id": "scan",
+    "label": "Scan",
+    "icon": "shield",
+    "prompt": "run a basic threat scan on the system",
+    "danger": false
+  }
+]

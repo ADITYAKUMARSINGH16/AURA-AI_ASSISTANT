@@ -120,24 +120,7 @@
 
                             <div id="attachment-preview" class="attachment-preview"></div>
 
-                            <div class="quick-actions" aria-label="Quick actions">
-                                <button class="qa-btn" id="qa-read-screen" title="Read Screen">
-                                    <svg viewBox="0 0 24 24"><path d="M2 12h20M12 2v20M5 5l14 14M19 5L5 19"/></svg>
-                                    <span>Read screen</span>
-                                </button>
-                                <button class="qa-btn" id="qa-lock" title="Lock System">
-                                    <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                                    <span>Lock</span>
-                                </button>
-                                <button class="qa-btn" id="qa-web" title="Web Search">
-                                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-                                    <span>Web</span>
-                                </button>
-                                <button class="qa-btn" id="qa-scan" title="Threat Scan">
-                                    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                    <span>Scan</span>
-                                </button>
-                            </div>
+                            <div class="quick-actions" aria-label="Quick actions"></div>
 
                             <div class="input-row">
                                 <button id="btn-attach" class="icon-btn input-icon" title="Attach file or image">
@@ -449,19 +432,29 @@
                             </div>
                         </div>
 
-                        <div class="card modules-panel">
+<div class="card modules-panel">
                             <div class="card-header"><span>Modules</span></div>
                             <div class="module-item mod-btn" id="wake-word-toggle" role="switch" aria-checked="false" tabindex="0" title="Server-side 'Hey Aura' detector (openWakeWord)">
                                 <span>Wake word ("Hey Aura")</span>
                                 <span class="wake-controls">
                                     <span class="status-idle module-status" id="wake-word-status" title="">OFF</span>
-                                    <button type="button" class="qa-btn compact" id="btn-wake-test" title="Say &quot;Hey Aura&quot; aloud — checks server detection for 10 seconds">TEST</button>
+                                    <button type="button" class="qa-btn compact" id="btn-wake-test" title="Say "Hey Aura" aloud — checks server detection for 10 seconds">TEST</button>
                                 </span>
                             </div>
                             <div class="module-item"><span>Voice core</span><span class="status-active module-status">ACTIVE</span></div>
                             <div class="module-item"><span>Schedule engine</span><span class="status-active module-status">ACTIVE</span></div>
                             <div class="module-item"><span>Home grid (WiZ)</span><span class="status-active module-status">READY</span></div>
                             <div class="module-item"><span>Archive sync</span><span class="status-sync module-status">IDLE</span></div>
+                        </div>
+
+                        <div class="card quick-actions-panel">
+                            <div class="card-header"><span>Quick Actions</span></div>
+                            <p class="settings-hint">Configure the quick action chips in the chat bar. Drag to reorder (not implemented); click to edit.</p>
+                            <div id="quick-actions-editor">
+                                <!-- Populated by script.js -->
+                            </div>
+                            <button id="btn-add-quick-action" class="qa-btn wide">+ ADD ACTION</button>
+                            <button id="btn-save-quick-actions" class="qa-btn wide accent-text" style="margin-top: 8px;">SAVE ACTIONS</button>
                         </div>
 
                         <div class="card proactive-panel">

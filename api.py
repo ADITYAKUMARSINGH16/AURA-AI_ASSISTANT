@@ -70,6 +70,7 @@ def _safe_data_path(name: str) -> str:
     return path
 
 PROACTIVE_CONFIG_FILE = _safe_data_path("proactive_config.json")
+QUICK_ACTIONS_CONFIG_FILE = _safe_data_path("config/quick_actions.json")
 
 # Timestamps paired 1:1 with queued wake-word signals (FIFO, same order).
 _wake_signal_times = _queue.Queue()
@@ -510,6 +511,97 @@ async def update_proactive(req: ProactiveConfigUpdate):
     # Containment-checked project path (see _safe_data_path above).
     Path(PROACTIVE_CONFIG_FILE).write_text(json.dumps(config, indent=4), encoding="utf-8")
     return {"status": "success"}
+
+
+# ──────────────────────────────────────────────────────────────
+# Quick Actions UI Config
+# ──────────────────────────────────────────────────────────────
+
+# Built-in defaults used when the JSON file is missing or corrupt.
+_DEFAULT_QUICK_ACTIONS = [
+    {"id": "screen", "label": "Read Screen", "icon": "eye", "prompt": "read my screen and describe what you see", "danger": False},
+    {"id": "lock", "label": "Lock", "icon": "lock", "prompt": "lock the system", "danger": True},
+    {"id": "web", "label": "Web", "icon": "globe", "prompt": "search the web for the latest news", "danger": False},
+    {"id": "scan", "label": "Scan", "icon": "shield", "prompt": "run a basic threat scan on the system", "danger": False},
+]
+
+def load_quick_actions():
+    """Load quick actions from JSON file; fall back to defaults on error."""
+    import json
+    import os
+    import logging
+    try:
+        cfg_path = Path(QUICK_ACTIONS_CONFIG_FILE)
+        if not cfg_path.exists():
+            return _DEFAULT_QUICK_ACTIONS
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            # Basic sanity: keep only valid-looking entries
+            valid = []
+            for a in data:
+                if (isinstance(a, dict) and a.get("id") and a.get("label") and a.get("prompt")):
+                    valid.append({
+                        "id": str(a["id"]),
+                        "label": str(a["label"]),
+                        "icon": str(a.get("icon", "bolt")),
+                        "prompt": str(a["prompt"]),
+                        "danger": bool(a.get("danger", False)),
+                    })
+            if valid:
+                return valid
+    except Exception as e:
+        logging.warning(f"Failed to load quick_actions.json ({e}); using defaults")
+    return _DEFAULT_QUICK_ACTIONS
+
+
+class QuickActionItem(BaseModel):
+    id: str
+    label: str
+    icon: str
+    prompt: str
+    danger: bool = False
+
+
+class QuickActionsUpdate(BaseModel):
+    actions: List[QuickActionItem]
+
+
+@app.get("/api/config/ui")
+async def get_ui_config():
+    return {"quick_actions": load_quick_actions()}
+
+
+@app.post("/api/config/ui")
+async def update_ui_config(req: QuickActionsUpdate):
+    import json
+    import logging
+    # Validate
+    if not req.actions or len(req.actions) > 12:
+        return {"status": "error", "message": "Must have 1-12 actions"}
+    cleaned = []
+    for a in req.actions:
+        label = (a.label or "").strip()
+        prompt = (a.prompt or "").strip()
+        if not label or not prompt:
+            return {"status": "error", "message": "Label and prompt are required"}
+        # Strip control chars
+        label = "".join(ch for ch in label if ch >= " " or ch in "\t\n")
+        prompt = "".join(ch for ch in prompt if ch >= " " or ch in "\t\n")
+        cleaned.append({
+            "id": str(a.id).strip() or str(len(cleaned)),
+            "label": label,
+            "icon": str(a.icon).strip() or "bolt",
+            "prompt": prompt,
+            "danger": bool(a.danger),
+        })
+    # Atomic write via temp file
+    cfg_path = Path(QUICK_ACTIONS_CONFIG_FILE)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cfg_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cleaned, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(cfg_path)
+    logging.info(f"Saved {len(cleaned)} quick actions to {cfg_path}")
+    return {"status": "success", "actions": cleaned}
 
 
 @app.get("/api/network/scan")
