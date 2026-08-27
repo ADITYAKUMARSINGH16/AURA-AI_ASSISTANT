@@ -462,6 +462,148 @@ img { max-width: 100%; }
     animation: ripple-grow 0.55s var(--ease-out) forwards;
     pointer-events: none;
 }
+
+/* ── Voice UX: Conversation-mode indicator ── */
+.conversation-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--border-accent);
+    border-radius: var(--radius-full);
+    background: var(--cyan-dim);
+    color: var(--cyan);
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: background var(--dur-fast), border-color var(--dur-fast), opacity var(--dur-fast);
+    opacity: 0.9;
+}
+.conversation-pill:hover { opacity: 1; background: var(--cyan); color: var(--bg-primary); }
+.pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pill-pulse 1.5s ease-in-out infinite;
+}
+@keyframes pill-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+.pill-hint {
+    font-size: var(--text-2xs);
+    opacity: 0.7;
+    font-family: var(--font-ui);
+    letter-spacing: normal;
+}
+
+/* ── Voice UX: Mic-denied banner ── */
+.mic-denied-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-md);
+    background: var(--danger-dim);
+    color: var(--danger);
+    margin-bottom: var(--space-3);
+    animation: banner-slide-in 0.3s var(--ease-out);
+}
+@keyframes banner-slide-in {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.banner-icon { font-size: var(--text-lg); }
+.banner-text { flex: 1; font-size: var(--text-sm); }
+
+/* ── Voice UX: TTS queue pill ── */
+.queue-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-full);
+    background: var(--warning-dim);
+    color: var(--warning);
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.1em;
+    margin-bottom: var(--space-2);
+}
+
+/* ── Voice UX: TTS fallback (text-only with mute icon) ── */
+.tts-fallback {
+    border-left: 3px solid var(--warning);
+    background: var(--warning-dim);
+}
+.tts-fallback .mute-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-right: var(--space-2);
+    border-radius: var(--radius-full);
+    background: var(--warning);
+    color: var(--bg-primary);
+    font-size: var(--text-xs);
+}
+
+/* ── Voice UX: Reactor breathing animation ── */
+#reactor-bay.breathing {
+    animation: reactor-breathe 3s ease-in-out infinite;
+}
+@keyframes reactor-breathe {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.15); }
+}
+
+/* ── Voice UX: Barge-in ripple ── */
+.barge-ripple {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid var(--cyan);
+    animation: barge-ripple-grow 0.3s var(--ease-out) forwards;
+    pointer-events: none;
+    z-index: 10;
+}
+@keyframes barge-ripple-grow {
+    from { transform: scale(0.8); opacity: 1; }
+    to { transform: scale(1.5); opacity: 0; }
+}
+
+/* ── Voice UX: Error state styling ── */
+#voice-btn.state-error,
+#reactor-bay.state-error {
+    --ring-speed: 0.5;
+    border-color: var(--danger);
+    box-shadow: 0 0 20px var(--danger-dim);
+}
+#voice-btn.state-error .core-status,
+#reactor-bay.state-error #reactor-status {
+    color: var(--danger);
+}
+#voice-btn.state-error {
+    color: var(--danger);
+    background: radial-gradient(circle at 50% 40%, var(--danger-dim), transparent 70%);
+}
+#voice-btn.state-error .orb-ring { border-color: var(--danger); }
+
+/* Disabled orb (mic denied) — non-interactive with tooltip */
+#voice-btn[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+/* State classes for voice button */
+#voice-btn.state-idle { --ring-speed: 0.8; }
+#voice-btn.state-listening { --ring-speed: 1.8; }
+#voice-btn.state-processing { --ring-speed: 2.5; }
+#voice-btn.state-speaking { --ring-speed: 1.2; }
+#voice-btn.state-error { --ring-speed: 0.5; }
 @keyframes ripple-grow { to { transform: scale(2.4); opacity: 0; } }
 
 /* ═══════════════ CHAT VIEW LAYOUT ═══════════════ */

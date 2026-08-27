@@ -109,9 +109,14 @@ const ConnectionMonitor = {
 // Central fetch wrapper: request timeout + connection tracking.
 // Long-running endpoints pass a larger `timeout` (chat can take minutes
 // when the agent loops through tools).
-async function api(path, { method = 'GET', headers, body, timeout = 15000 } = {}) {
+async function api(path, { method = 'GET', headers, body, timeout = 15000, signal = null } = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('timeout')), timeout);
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const linkAbort = () => controller.abort();
+    if (signal) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener('abort', linkAbort, { once: true });
+    }
     try {
         const res = await fetch(path, { method, headers, body, signal: controller.signal });
         ConnectionMonitor.record(true);
@@ -121,6 +126,7 @@ async function api(path, { method = 'GET', headers, body, timeout = 15000 } = {}
         throw err;
     } finally {
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', linkAbort);
     }
 }
 
@@ -238,8 +244,44 @@ const terminalOutput = document.getElementById('terminal-output');
 const chatOutput = document.getElementById('chat-output');
 window.auraState = 'idle';
 
+// ── Centralized state machine with allowed transitions ──
+const ALLOWED_TRANSITIONS = {
+    idle: ['listening', 'processing', 'speaking', 'error'],
+    listening: ['processing', 'speaking', 'idle', 'error'],
+    processing: ['speaking', 'idle', 'error'],
+    speaking: ['idle', 'listening', 'error'],  // listening = barge-in
+    error: ['idle'],
+};
+
+const IS_DEV = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+function validateTransition(from, to) {
+    const allowed = ALLOWED_TRANSITIONS[from] || [];
+    if (!allowed.includes(to)) {
+        if (IS_DEV) {
+            console.warn(`[StateMachine] Illegal transition: ${from} → ${to} (allowed: ${allowed.join(', ') || 'none'})`);
+        }
+        return false;
+    }
+    return true;
+}
+
+// ── Voice UX globals ──
+let ttsQueue = [];                    // queue of {text, resolve, reject}
+let isTtsPlaying = false;             // true while audio is actively playing
+let audioGainNode = null;             // master gain for ducking during barge-in
+let conversationModeArmed = false;    // true when auto-listen chain is armed
+let micDenied = false;                // true when getUserMedia was denied
+
 function setAuraState(state) {
+    // Centralized transition; illegal moves are rejected (and logged in dev).
+    if (!validateTransition(window.auraState, state)) {
+        // Allow a forced return to idle as an escape hatch for error recovery,
+        // but never silently accept an illegal forward move into a stuck state.
+        if (state !== 'idle') return;
+    }
     window.auraState = state;
+
     const vBtn = document.getElementById('voice-btn');
     const statusEl = vBtn?.querySelector('.core-status');
 
@@ -249,22 +291,27 @@ function setAuraState(state) {
         case 'listening': speed = 1.8; break;
         case 'processing': speed = 2.5; break;
         case 'speaking': speed = 1.2; break;
+        case 'error': speed = 0.5; break;
     }
     document.documentElement.style.setProperty('--ring-speed', speed);
 
+    // Update conversation-mode indicator visibility
+    updateConversationIndicator(state);
+
     if (vBtn && statusEl) {
-        vBtn.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking');
+        vBtn.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking', 'state-error');
         vBtn.classList.add(`state-${state}`);
         statusEl.textContent =
             state === 'listening' ? 'HEARING' :
             state === 'processing' ? 'THINKING' :
-            state === 'speaking' ? 'SPEAKING' : 'ONLINE';
+            state === 'speaking' ? 'SPEAKING' :
+            state === 'error' ? 'ERROR' : 'ONLINE';
     }
 
     // Reactor bay mirrors the same machine
     const bay = document.getElementById('reactor-bay');
     if (bay) {
-        bay.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking');
+        bay.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking', 'state-error');
         bay.classList.add(`state-${state}`);
     }
     const rStatus = document.getElementById('reactor-status');
@@ -272,9 +319,102 @@ function setAuraState(state) {
         rStatus.textContent =
             state === 'listening' ? 'HEARING' :
             state === 'processing' ? 'THINKING' :
-            state === 'speaking' ? 'SPEAKING' : 'ONLINE';
+            state === 'speaking' ? 'SPEAKING' :
+            state === 'error' ? 'ERROR' : 'ONLINE';
     }
     reactor.setState(state);
+}
+
+// ── Conversation-mode indicator (persistent "Listening..." pill) ──
+let conversationIndicator = null;
+
+function ensureConversationIndicator() {
+    if (conversationIndicator) return conversationIndicator;
+    const pill = document.createElement('div');
+    pill.id = 'conversation-indicator';
+    pill.className = 'conversation-pill';
+    pill.innerHTML = `
+        <span class="pill-dot"></span>
+        <span class="pill-text">Listening…</span>
+        <span class="pill-hint">Auto-chain armed — click to cancel</span>
+    `;
+    pill.title = 'AURA will keep listening after each reply (ends with "?"). Click to cancel.';
+    pill.addEventListener('click', () => {
+        conversationModeArmed = false;
+        updateConversationIndicator(window.auraState);
+    });
+    // Insert near the input row
+    const inputRow = document.querySelector('.input-row');
+    if (inputRow) {
+        inputRow.parentNode.insertBefore(pill, inputRow);
+    }
+    conversationIndicator = pill;
+    return pill;
+}
+
+function updateConversationIndicator(state) {
+    const pill = ensureConversationIndicator();
+    if (!pill) return;
+    const isArmed = conversationModeArmed && (state === 'idle' || state === 'speaking' || state === 'processing');
+    pill.style.display = isArmed ? 'inline-flex' : 'none';
+    // Reactor breathing: add a slow pulse class when armed
+    const bay = document.getElementById('reactor-bay');
+    if (bay) {
+        bay.classList.toggle('breathing', isArmed);
+    }
+}
+
+// ── Mic-denied inline banner ──
+let micDeniedBanner = null;
+
+function showMicDeniedBanner() {
+    if (micDeniedBanner) return;
+    const banner = document.createElement('div');
+    banner.id = 'mic-denied-banner';
+    banner.className = 'mic-denied-banner';
+    banner.innerHTML = `
+        <span class="banner-icon">🎤</span>
+        <span class="banner-text">Microphone blocked — enable it in browser/site settings</span>
+        <button type="button" class="qa-btn compact" id="mic-retry-btn">Retry</button>
+    `;
+    // Insert at top of chat/terminal output area
+    const chatView = document.getElementById('view-chat');
+    if (chatView) {
+        chatView.insertBefore(banner, chatView.firstChild);
+    }
+    micDeniedBanner = banner;
+    document.getElementById('mic-retry-btn')?.addEventListener('click', async () => {
+        micDenied = false;
+        hideMicDeniedBanner();
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(t => t.stop()); // just test permission
+            disableVoiceOrb(false);
+            setAuraState('idle');
+            showToast('MICROPHONE', 'Access restored.', 'success');
+        } catch (e) {
+            showMicDeniedBanner();
+            setAuraState('error');
+            showToast('MICROPHONE', 'Still blocked — check site permissions.', 'error');
+        }
+    });
+}
+
+function hideMicDeniedBanner() {
+    if (micDeniedBanner) {
+        micDeniedBanner.remove();
+        micDeniedBanner = null;
+    }
+}
+
+// ── Barge-in ripple on orb ──
+function triggerBargeInRipple() {
+    const vBtn = document.getElementById('voice-btn');
+    if (!vBtn) return;
+    const ripple = document.createElement('span');
+    ripple.className = 'barge-ripple';
+    vBtn.appendChild(ripple);
+    setTimeout(() => ripple.remove(), 300);
 }
 
 const commandInput = document.getElementById('command-input');
@@ -411,13 +551,37 @@ document.addEventListener('keydown', (e) => {
 let audioCtx = null;
 let analyser = null;
 let source = null;
-let animationId = null;
 let currentAudio = null;
 
+// ════════════════════════════════════════════════════════════
+// TTS QUEUE & PLAYBACK (with barge-in ducking, queue guard, error fallback)
+// ════════════════════════════════════════════════════════════
 async function playTTS(text) {
     if (!text) return;
 
+    // Single play chain: if already speaking, queue (max depth 2, drop oldest).
+    // Barge-in is decided by live-mic audio below, never by a racing reply.
+    if (isTtsPlaying) {
+        if (ttsQueue.length >= 2) {
+            const dropped = ttsQueue.shift();
+            dropped?.reject(new Error('TTS queue overflow'));
+        }
+        updateQueuePill();
+        return new Promise((resolve, reject) => {
+            ttsQueue.push({ text, resolve, reject });
+            updateQueuePill();
+        });
+    }
+
+    isTtsPlaying = true;
+    updateQueuePill();
     setAuraState('speaking');
+
+    let url = null;
+    let audio = null;
+    let drawLoopId = 0;
+    let bargeFrameId = 0;
+    let finished = false;
 
     try {
         await api('/api/voice/speaking', {
@@ -430,72 +594,198 @@ async function playTTS(text) {
         if (!response.ok) throw new Error('TTS fetch failed');
 
         const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
+        url = URL.createObjectURL(blob);
 
-        if (currentAudio) {
-            currentAudio.pause();
-        }
-        const audio = new Audio(url);
+        audio = new Audio(url);
         currentAudio = audio;
 
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 64;
+            audioGainNode = audioCtx.createGain(); // master gain for ducking
+            audioGainNode.connect(audioCtx.destination);
         }
+        // Restore unity gain in case a previous barge-in left it ducked.
+        audioGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+        audioGainNode.gain.setValueAtTime(1.0, audioCtx.currentTime);
 
         if (audioCtx.state === 'suspended') await audioCtx.resume();
-        if (source) source.disconnect();
+        if (source) { try { source.disconnect(); } catch (e) {} }
 
         source = audioCtx.createMediaElementSource(audio);
         source.connect(analyser);
-        analyser.connect(audioCtx.destination);
+        analyser.connect(audioGainNode);
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         function draw() {
-            animationId = requestAnimationFrame(draw);
+            drawLoopId = requestAnimationFrame(draw);
             analyser.getByteFrequencyData(dataArray);
             reactor.feed(dataArray, null);
         }
 
-        audio.onended = async () => {
-            cancelAnimationFrame(animationId);
+        // Barge-in: sample the live mic while speaking; trigger once on spike.
+        function checkBargeIn() {
+            if (finished) return;
+            if (!micAnalyser || !micDataArray || !currentAudio || currentAudio.paused) {
+                bargeFrameId = requestAnimationFrame(checkBargeIn);
+                return;
+            }
+            micAnalyser.getByteFrequencyData(micDataArray);
+            let sum = 0;
+            for (let i = 0; i < micDataArray.length; i++) sum += micDataArray[i];
+            const rms = sum / micDataArray.length;
+            if (rms > 30) {
+                handleBargeIn();
+                return;
+            }
+            bargeFrameId = requestAnimationFrame(checkBargeIn);
+        }
+
+        function handleBargeIn() {
+            if (finished) return;
+            // Immediate ≤150ms feedback: duck gain, ripple, then clean stop.
+            if (audioGainNode) {
+                const t = audioCtx.currentTime;
+                audioGainNode.gain.cancelScheduledValues(t);
+                audioGainNode.gain.setValueAtTime(audioGainNode.gain.value, t);
+                audioGainNode.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+            }
+            triggerBargeInRipple();
+            window._bargeIn = true;
+            clearTtsQueue(); // user is redirecting the conversation
+            api('/api/voice/stop', { method: 'POST' }).catch(() => {});
+            if (audio) { audio.pause(); audio.dispatchEvent(new Event('ended')); }
+        }
+
+        audio.onended = () => {
+            if (finished) return;
+            finished = true;
+            cancelAnimationFrame(drawLoopId);
+            cancelAnimationFrame(bargeFrameId);
             reactor.clearFeed();
-            URL.revokeObjectURL(url);
+            if (url) URL.revokeObjectURL(url);
             currentAudio = null;
             window._lastPlaybackEnd = Date.now();
+            isTtsPlaying = false;
+            updateQueuePill();
             setAuraState('idle');
             api('/api/voice/speaking', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({is_speaking: false})
             }).catch(() => {});
-            // Continue the conversation only after the anti-echo settle window
-            // (2s) has elapsed, and only if nothing else has taken the mic.
-            if (window._continueConversation) {
-                window._continueConversation = false;
+            processTtsQueue();
+
+            if (window._bargeIn) {
+                window._bargeIn = false;
+                beginListen(); // user spoke over us — start a fresh listen now
+                return;
+            }
+
+            if (conversationModeArmed) {
+                // Keep the "Listening…" pill breathing through the 2s settle.
                 setTimeout(() => {
-                    if (canStartListening()) voiceBtn.click();
+                    if (canStartListening()) {
+                        conversationModeArmed = false;
+                        updateConversationIndicator(window.auraState);
+                        beginListen();
+                    } else {
+                        conversationModeArmed = false;
+                        updateConversationIndicator(window.auraState);
+                        closeMic();
+                    }
                 }, 2100);
+            } else {
+                closeMic();
             }
         };
 
-        audio.play();
+        await audio.play();
         draw();
+        bargeFrameId = requestAnimationFrame(checkBargeIn);
 
     } catch (e) {
+        if (finished) return;
+        finished = true;
         console.error("Audio Playback Error:", e);
+        cancelAnimationFrame(drawLoopId);
+        cancelAnimationFrame(bargeFrameId);
         reactor.clearFeed();
+        if (url) URL.revokeObjectURL(url);
+        if (audio) { try { audio.pause(); } catch (err) {} }
         currentAudio = null;
         window._lastPlaybackEnd = Date.now();
+        isTtsPlaying = false;
+        updateQueuePill();
+        showTtsFallback(text); // silent-mode fallback; never block chat
         setAuraState('idle');
         api('/api/voice/speaking', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({is_speaking: false})
         }).catch(() => {});
+        clearTtsQueue();
+        closeMic();
     }
+}
+
+function clearTtsQueue() {
+    ttsQueue.forEach(q => q.reject(new Error('TTS cancelled')));
+    ttsQueue = [];
+    updateQueuePill();
+}
+
+function processTtsQueue() {
+    if (ttsQueue.length > 0 && !isTtsPlaying) {
+        const next = ttsQueue.shift();
+        playTTS(next.text).then(next.resolve, next.reject);
+    }
+}
+
+function updateQueuePill() {
+    let pill = document.getElementById('tts-queue-pill');
+    if (ttsQueue.length > 0) {
+        if (!pill) {
+            pill = document.createElement('div');
+            pill.id = 'tts-queue-pill';
+            pill.className = 'queue-pill';
+            const inputRow = document.querySelector('.input-row');
+            if (inputRow) {
+                inputRow.parentNode.insertBefore(pill, inputRow);
+            }
+        }
+        pill.textContent = `Queued reply (${ttsQueue.length})`;
+        pill.style.display = 'inline-flex';
+    } else if (pill) {
+        pill.style.display = 'none';
+    }
+}
+
+function showTtsFallback(text) {
+    // Silent-mode fallback: mark the reply as text-only (mute icon) without
+    // duplicating the response that the normal render path already added.
+    const bubbles = chatOutput.querySelectorAll('.bubble-aura:not(.tts-fallback)');
+    const latest = bubbles[bubbles.length - 1];
+    if (latest && latest.textContent.trim()) {
+        latest.classList.add('tts-fallback');
+        const icon = document.createElement('span');
+        icon.className = 'mute-icon';
+        icon.title = 'Audio playback failed — text only';
+        icon.textContent = '🔇';
+        latest.prepend(icon);
+    } else {
+        const chatDiv = document.createElement('div');
+        chatDiv.className = 'chat-bubble bubble-aura tts-fallback';
+        chatDiv.innerHTML = `
+            <span class="mute-icon" title="Audio playback failed — text only">🔇</span>
+            <span>${escapeHtml(text)}</span>
+        `;
+        chatOutput.appendChild(chatDiv);
+        chatOutput.scrollTop = chatOutput.scrollHeight;
+    }
+    showToast('AUDIO', 'Playback failed — showing text only', 'warning');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -896,54 +1186,95 @@ commandInput.addEventListener('keydown', async (e) => {
 });
 
 async function startVoiceInteraction() {
-    // If already playing audio, stop it (barge-in). The user is taking over,
-    // so don't auto-relisten when the interrupted playback winds down.
-    if (currentAudio) {
-        window._continueConversation = false;
-        currentAudio.pause();
-        currentAudio.dispatchEvent(new Event('ended')); // Trigger cleanup
+    if (window.auraState === 'listening') return;
+
+    // Barge-in: user clicked to take over while AURA was speaking.
+    if (isTtsPlaying && currentAudio) {
+        conversationModeArmed = false;
+        updateConversationIndicator(window.auraState);
+        clearTtsQueue();
+        triggerBargeInRipple();
         api('/api/voice/stop', { method: 'POST' }).catch(() => {});
+        currentAudio.pause();
+        currentAudio.dispatchEvent(new Event('ended')); // route through onended cleanup
     }
+
+    await beginListen();
+}
+
+// Open the mic once per interaction (reused across auto-continue turns).
+async function beginListen() {
+    if (micDenied) {
+        showMicDeniedBanner();
+        setAuraState('error');
+        disableVoiceOrb(true);
+        return;
+    }
+
+    const opened = await ensureMicOpen();
+    if (!opened) return; // denial banner + error state already surfaced
 
     if (window.auraState === 'listening') return;
     setAuraState('listening');
     commandInput.disabled = true;
     voiceBtn.setAttribute('aria-pressed', 'true');
+    startMicAnim();
 
-    // Start Live Mic Visualization
-    startMicVisualization();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
-        const response = await api('/api/voice/listen', { method: 'POST', timeout: 60000 });
+        const response = await api('/api/voice/listen', {
+            method: 'POST',
+            signal: controller.signal
+        });
         const data = await response.json();
 
-        stopMicVisualization();
-        setAuraState('idle');
+        stopMicAnim();
         voiceBtn.setAttribute('aria-pressed', 'false');
         commandInput.disabled = false;
 
-        if (data.status === 'success') {
-            if (data.transcription) {
-                await appendToTerminal(data.transcription, 'user');
-                window._continueConversation = data.continue || false;
-                playTTS(data.response);
-                await appendToTerminal(data.response, 'aura');
-            } else {
-                await appendToTerminal('No speech detected.', 'system');
-            }
+        if (data.status === 'success' && data.transcription) {
+            await appendToTerminal(data.transcription, 'user');
+            conversationModeArmed = !!(data.continue);
+            updateConversationIndicator(window.auraState);
+            await appendToTerminal(data.response, 'aura');
+            playTTS(data.response); // mic stays open for barge-in
+            if (!isTtsPlaying && !conversationModeArmed) closeMic();
         } else if (data.status === 'no_speech') {
-            // Silence is normal (e.g. nobody answers a follow-up question)
+            conversationModeArmed = false;
+            updateConversationIndicator(window.auraState);
             await appendToTerminal('No speech detected.', 'system');
+            closeMic();
         } else {
+            conversationModeArmed = false;
+            updateConversationIndicator(window.auraState);
             await appendToTerminal(data.message || 'VOICE ERROR', 'error');
+            closeMic();
         }
     } catch (error) {
-        stopMicVisualization();
-        setAuraState('idle');
+        stopMicAnim();
+        if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+            showToast('LISTENING', "Didn't catch that — try again", 'warning');
+            await appendToTerminal('Listening timeout.', 'system');
+        } else if (error && (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError')) {
+            micDenied = true;
+            showMicDeniedBanner();
+            setAuraState('error');
+            disableVoiceOrb(true);
+        } else {
+            await appendToTerminal('MIC CONNECTION FAILED', 'error');
+            showToast('VOICE ERROR', 'Could not reach the voice service.', 'error');
+        }
+        closeMic();
+    } finally {
+        clearTimeout(timeoutId);
+        stopMicAnim();
         voiceBtn.setAttribute('aria-pressed', 'false');
         commandInput.disabled = false;
-        await appendToTerminal('MIC CONNECTION FAILED', 'error');
-        showToast('VOICE ERROR', 'Could not reach the voice service.', 'error');
+        // Never linger in a transient state: if still "listening" (not handed
+        // off to speaking), settle back to idle.
+        if (window.auraState === 'listening') setAuraState('idle');
     }
 }
 
@@ -959,7 +1290,8 @@ reactorBayEl?.addEventListener('keydown', (e) => {
     }
 });
 
-// Live Mic Visualization Logic
+// Live Mic Logic — mic stays open across a turn (listen → speak → maybe
+// auto-relisten) so barge-in can sample user audio during TTS playback.
 let micStream = null;
 let micAudioCtx = null;
 let micAnalyser = null;
@@ -973,49 +1305,82 @@ function canStartListening() {
     return !currentAudio && window.auraState !== 'listening' && settled;
 }
 
-async function startMicVisualization() {
-    try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const source = micAudioCtx.createMediaStreamSource(micStream);
-
-        micAnalyser = micAudioCtx.createAnalyser();
-        micAnalyser.fftSize = 256;
-        source.connect(micAnalyser);
-
-        micDataArray = new Uint8Array(micAnalyser.frequencyBinCount);
-        const micTimeArray = new Uint8Array(micAnalyser.fftSize);
-
-        function renderMic() {
-            if(window.auraState !== 'listening') return;
-            micAnimFrame = requestAnimationFrame(renderMic);
-
-            micAnalyser.getByteFrequencyData(micDataArray);
-
-            micAnalyser.getByteTimeDomainData(micTimeArray);
-            let sum = 0;
-            for(let i = 0; i < micTimeArray.length; i++) {
-                let val = (micTimeArray[i] - 128) / 128;
-                sum += val * val;
-            }
-            let rms = Math.sqrt(sum / micTimeArray.length);
-            reactor.feed(micDataArray, micTimeArray);
-
-            document.documentElement.style.setProperty('--ring-pulse', rms.toFixed(3));
-        }
-        renderMic();
-    } catch(err) {
-        console.warn("Mic visualization failed", err);
+function disableVoiceOrb(on) {
+    if (!voiceBtn) return;
+    if (on) {
+        voiceBtn.setAttribute('aria-disabled', 'true');
+        voiceBtn.title = 'Microphone access denied — enable it in browser/site settings';
+    } else {
+        voiceBtn.removeAttribute('aria-disabled');
+        voiceBtn.title = 'Start voice interaction';
     }
 }
 
-function stopMicVisualization() {
-    if (micAnimFrame) cancelAnimationFrame(micAnimFrame);
-    if (micStream) micStream.getTracks().forEach(t => t.stop());
-    if (micAudioCtx && micAudioCtx.state !== 'closed') micAudioCtx.close();
+// Acquire and wire the mic stream + analyser. Returns true on success; on
+// denial it surfaces the banner + error state and returns false (no throw).
+async function ensureMicOpen() {
+    if (micStream && micAnalyser && micAudioCtx && micAudioCtx.state !== 'closed') {
+        return true; // reuse the live stream across auto-continue turns
+    }
+    try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+        console.warn('Mic denied/unavailable:', err && err.name);
+        micDenied = true;
+        showMicDeniedBanner();
+        setAuraState('error');
+        disableVoiceOrb(true);
+        return false;
+    }
+    micDenied = false;
+    hideMicDeniedBanner();
+    disableVoiceOrb(false);
 
+    micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = micAudioCtx.createMediaStreamSource(micStream);
+    micAnalyser = micAudioCtx.createAnalyser();
+    micAnalyser.fftSize = 256;
+    source.connect(micAnalyser);
+    micDataArray = new Uint8Array(micAnalyser.frequencyBinCount);
+    return true;
+}
+
+function startMicAnim() {
+    if (!micAnalyser) return;
+    stopMicAnim();
+    const micTimeArray = new Uint8Array(micAnalyser.fftSize);
+    function renderMic() {
+        if (window.auraState !== 'listening') { micAnimFrame = 0; return; }
+        micAnimFrame = requestAnimationFrame(renderMic);
+        micAnalyser.getByteFrequencyData(micDataArray);
+        micAnalyser.getByteTimeDomainData(micTimeArray);
+        let sum = 0;
+        for (let i = 0; i < micTimeArray.length; i++) {
+            let val = (micTimeArray[i] - 128) / 128;
+            sum += val * val;
+        }
+        let rms = Math.sqrt(sum / micTimeArray.length);
+        reactor.feed(micDataArray, micTimeArray);
+        document.documentElement.style.setProperty('--ring-pulse', rms.toFixed(3));
+    }
+    micAnimFrame = requestAnimationFrame(renderMic);
+}
+
+function stopMicAnim() {
+    if (micAnimFrame) cancelAnimationFrame(micAnimFrame);
+    micAnimFrame = 0;
     reactor.clearFeed();
     document.documentElement.style.setProperty('--ring-pulse', 0);
+}
+
+// Fully tear down the mic. Safe to call when not armed for auto-continue.
+function closeMic() {
+    stopMicAnim();
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (micAudioCtx && micAudioCtx.state !== 'closed') { try { micAudioCtx.close(); } catch (e) {} }
+    micAudioCtx = null;
+    micAnalyser = null;
+    micDataArray = null;
 }
 
 // ═══════════════════════════════════════════════════════════
