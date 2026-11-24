@@ -22,6 +22,7 @@ edge-tts
 pywizlight
 openwakeword
 onnxruntime
+websockets
 pystray
 # Now Playing (SMTC): modern winrt projection family — legacy winsdk has no
 # wheels for current Python builds. Collections package is needed for session

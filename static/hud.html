@@ -20,6 +20,31 @@
         </div>
     </div>
 
+    <!-- ═══════════════ ONBOARDING OVERLAY (first-run health checklist) ═══════════════ -->
+    <div class="onboard-overlay" id="onboard-overlay" role="dialog" aria-modal="true" aria-labelledby="onboard-title" hidden>
+        <div class="onboard-backdrop" tabindex="-1" aria-hidden="true"></div>
+        <div class="onboard-card">
+            <div class="onboard-header">
+                <div class="onboard-logo">
+                    <img src="logo_small.webp" alt="AURA" width="48" height="48">
+                </div>
+                <h1 id="onboard-title">Welcome to AURA</h1>
+                <p class="onboard-subtitle">Quick health check before you enter the HUD</p>
+            </div>
+            <div class="onboard-body">
+                <div class="onboard-checklist" id="onboard-checklist">
+                    <!-- Rows injected by script.js -->
+                </div>
+            </div>
+            <div class="onboard-footer">
+                <button class="qa-btn primary" id="onboard-enter" disabled>
+                    <span>Enter the HUD</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══════════════ APP SHELL ═══════════════ -->
     <div class="app-shell">
 
@@ -314,7 +339,13 @@
                         <div class="card log-panel span-2">
                             <div class="card-header">
                                 <span>System Logs</span>
-                                <button class="qa-btn compact" id="btn-log-refresh">REFRESH</button>
+                                <div class="log-actions" style="display: flex; gap: 8px; align-items: center;">
+                                    <div class="log-toggle-group" style="display: flex; gap: 4px;">
+                                        <button class="qa-btn compact active" id="btn-log-server" data-source="server" title="Server runtime & console logs">SERVER</button>
+                                        <button class="qa-btn compact" id="btn-log-agent" data-source="agent" title="Agent reasoning & tool logs">AGENT</button>
+                                    </div>
+                                    <button class="qa-btn compact" id="btn-log-refresh" title="Refresh logs">REFRESH</button>
+                                </div>
                             </div>
                             <div class="log-output" id="log-output"></div>
                         </div>
@@ -485,6 +516,12 @@
                             <div class="shortcut-item"><span class="shortcut-desc">Clear console</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span></div>
                             <div class="shortcut-item"><span class="shortcut-desc">Toggle voice core</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span></div>
                             <div class="shortcut-item"><span class="shortcut-desc">Close dialogs</span><span class="shortcut-keys"><span class="key">ESC</span></span></div>
+                        </div>
+
+                        <div class="card onboard-replay-card">
+                            <div class="card-header"><span>First-Run Setup</span></div>
+                            <p class="settings-hint">Re-run the onboarding health checklist.</p>
+                            <button id="btn-replay-onboard" class="qa-btn wide accent-text">REPLAY SETUP</button>
                         </div>
 
                     </div>

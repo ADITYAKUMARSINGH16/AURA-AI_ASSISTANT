@@ -485,6 +485,69 @@
             "id": "5203bb51-e029-4ea3-a97b-cf1feabc50bb",
             "timestamp": "2026-08-25T13:05:26.708749",
             "source_context": "Extracted from: Remember that my favorite editor is VS Code...."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "DSA (Data Structures and Algorithms) involves Data Structures (organizing data efficiently) and Algorithms (step-by-step procedures for solving problems). The goal of mastering DSA is to write efficient, optimized, and scalable software.",
+            "importance": 9,
+            "id": "46a881eb-2262-4ad5-afe7-097f2ffe0a95",
+            "timestamp": "2026-08-27T21:38:59.657137",
+            "source_context": "Extracted from: what is DSA what is DSA what is TSA what is..."
+        },
+        {
+            "layer": "semantic",
+            "category": "data_structure_definition",
+            "content": "A Linked List is a fundamental linear data structure that stores elements in a sequential manner using nodes connected by pointers, unlike arrays which store elements contiguously.",
+            "importance": 10,
+            "id": "8941dfbb-0db6-4887-b935-b98258feb8c5",
+            "timestamp": "2026-08-27T22:49:19.639129",
+            "source_context": "Extracted from: what is linked list what is linked list what is..."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "A Linked List is a fundamental linear data structure used in computer science to store a collection of elements in a sequential manner.",
+            "importance": 9,
+            "id": "2aa368d7-4079-4062-8ffa-afad1fe7f4c9",
+            "timestamp": "2026-08-27T22:49:32.322224",
+            "source_context": "Extracted from: what is a linked list..."
+        },
+        {
+            "layer": "semantic",
+            "category": "data_structure_definition",
+            "content": "A Linked List is a fundamental linear data structure used to organize data sequentially, storing data in separate nodes linked by pointers.",
+            "importance": 10,
+            "id": "0969bcd1-a097-417b-a6c4-d4b9ef0d72d7",
+            "timestamp": "2026-08-27T22:49:45.074863",
+            "source_context": "Extracted from: what is linked list what is linked list what is..."
+        },
+        {
+            "layer": "semantic",
+            "category": "system_identity",
+            "content": "The assistant's name is AURA (Autonomous Utility & Response Agent), powered by the Gemma 4 large language model, running locally through Ollama.",
+            "importance": 10,
+            "id": "a083899b-9257-45a7-a1e1-55383a1bd44a",
+            "timestamp": "2026-11-22T21:00:23.819596",
+            "source_context": "Extracted from: who am I who are you and what is this..."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "Artificial Intelligence (AI) is the simulation of human intelligence processes by machines, aiming to enable machines to perform tasks requiring human thought (Learning, Reasoning, Problem-solving, Perception, Language understanding).",
+            "importance": 10,
+            "id": "938a9ff1-4d3a-4c6a-afeb-f39878e15486",
+            "timestamp": "2026-11-22T21:25:28.609365",
+            "source_context": "Extracted from: what is AI can you explain that..."
+        },
+        {
+            "layer": "semantic",
+            "category": "facts",
+            "content": "Howrah is a major city in the state of West Bengal, India, historically and commercially significant, associated with the railway hub and industrial centers of the region.",
+            "importance": 8,
+            "id": "1105b026-67d8-4648-a49a-dbf5efd1ab40",
+            "timestamp": "2026-11-22T21:46:17.739764",
+            "source_context": "Extracted from: Howrah..."
         }
     ],
     "episodic": [],

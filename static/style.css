@@ -60,6 +60,13 @@ img { max-width: 100%; }
 }
 #boot-overlay.dismissed { opacity: 0; visibility: hidden; pointer-events: none; }
 
+.boot-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+}
+
 .boot-logo-img {
     width: 88px;
     height: 88px;
@@ -591,11 +598,11 @@ img { max-width: 100%; }
 }
 #voice-btn.state-error .orb-ring { border-color: var(--danger); }
 
-/* Disabled orb (mic denied) — non-interactive with tooltip */
+/* Voice orb state when browser mic is not permissioned — stays clickable for backend listening */
 #voice-btn[aria-disabled="true"] {
-    cursor: not-allowed;
-    opacity: 0.55;
-    pointer-events: none;
+    cursor: pointer;
+    opacity: 0.9;
+    pointer-events: auto;
 }
 
 /* State classes for voice button */
@@ -1679,6 +1686,139 @@ img { max-width: 100%; }
 
 .confirm-message { font-size: var(--text-base); color: var(--text-secondary); margin-bottom: var(--space-5); }
 .confirm-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+
+/* ═══════════════ ONBOARDING OVERLAY ═══════════════ */
+.onboard-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-modal) + 10); /* above regular modals */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+.onboard-overlay[hidden] { display: none; }
+
+.onboard-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(2, 6, 14, 0.8);
+    backdrop-filter: blur(8px);
+    opacity: 0;
+    animation: onboard-fade-in var(--dur-med) var(--ease-out) forwards;
+}
+@keyframes onboard-fade-in { to { opacity: 1; } }
+
+.onboard-card {
+    position: relative;
+    width: min(460px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateY(12px) scale(0.98);
+    animation: onboard-slide-up var(--dur-med) var(--ease-out) forwards;
+}
+@keyframes onboard-slide-up { to { transform: none; } }
+
+.onboard-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: var(--space-5) var(--space-5) var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
+}
+.onboard-logo { margin-bottom: var(--space-3); }
+.onboard-header h1 {
+    font-family: var(--font-display);
+    font-size: var(--text-2xl);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-1);
+}
+.onboard-subtitle {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.onboard-body {
+    padding: var(--space-4) var(--space-5);
+    overflow-y: auto;
+}
+
+.onboard-checklist { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.onboard-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.onboard-row:hover { border-color: var(--border-strong); }
+
+.onboard-status-badge {
+    flex: 0 0 54px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    padding: 3px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+}
+.onboard-status-badge span { display: none; }
+.onboard-row[data-state="pending"] .badge-pending { display: inline; color: var(--text-dim); }
+.onboard-row[data-state="checking"] .badge-checking { display: inline; color: var(--accent); }
+.onboard-row[data-state="checking"] .onboard-status-badge { border-color: var(--accent); }
+.onboard-row[data-state="pass"] .badge-pass { display: inline; color: var(--green); }
+.onboard-row[data-state="pass"] .onboard-status-badge { background: rgba(16, 185, 129, 0.12); border-color: var(--green); }
+.onboard-row[data-state="fail"] .badge-fail { display: inline; color: var(--danger); }
+.onboard-row[data-state="fail"] .onboard-status-badge { background: rgba(239, 68, 68, 0.12); border-color: var(--danger); }
+
+.onboard-label {
+    flex: 1;
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    min-width: 0;
+}
+
+.onboard-action {
+    flex: 0 0 auto;
+    font-size: var(--text-xs);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+}
+
+.onboard-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space-4) var(--space-5);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-base);
+}
+.onboard-footer .qa-btn { display: inline-flex; align-items: center; gap: var(--space-2); }
+.onboard-footer .qa-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.onboard-footer .qa-btn svg { width: 18px; height: 18px; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .onboard-card { animation: none; }
+}
 
 /* ═══════════════ NOTIFICATION DRAWER ═══════════════ */
 .notif-drawer {

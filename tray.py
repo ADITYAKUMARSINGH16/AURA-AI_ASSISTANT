@@ -27,10 +27,10 @@ backend_process = subprocess.Popen(
 )
 
 def on_open_hud(icon, item):
-    webbrowser.open("http://127.0.0.1:8000/")
+    webbrowser.open("http://127.0.0.1:8000/hud")
 
 def on_open_landing(icon, item):
-    webbrowser.open("http://127.0.0.1:8000/welcome")
+    webbrowser.open("http://127.0.0.1:8000/")
 
 def on_quit(icon, item):
     if os.name == 'nt':

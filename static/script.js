@@ -109,7 +109,7 @@ const ConnectionMonitor = {
 // Central fetch wrapper: request timeout + connection tracking.
 // Long-running endpoints pass a larger `timeout` (chat can take minutes
 // when the agent loops through tools).
-async function api(path, { method = 'GET', headers, body, timeout = 15000, signal = null } = {}) {
+async function api(path, { method = 'GET', headers, body, timeout = 15000, signal = null, noThrow = false } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     const linkAbort = () => controller.abort();
@@ -119,7 +119,12 @@ async function api(path, { method = 'GET', headers, body, timeout = 15000, signa
     }
     try {
         const res = await fetch(path, { method, headers, body, signal: controller.signal });
-        ConnectionMonitor.record(true);
+        ConnectionMonitor.record(res.ok);
+        if (!res.ok && !noThrow) {
+            const err = new Error(`HTTP ${res.status}`);
+            err.status = res.status;
+            throw err;
+        }
         return res;
     } catch (err) {
         ConnectionMonitor.record(false);
@@ -946,6 +951,192 @@ function enhanceLatestBubble(rawText = null) {
     latest.appendChild(copyBtn);
 }
 
+// Runs one chat turn: requests the assistant reply (streaming by default) and
+// renders it to the chat terminal, then plays TTS. Returns the final reply
+// text ('' when the model produced nothing). Shared by the text-input path and
+// the voice path so a spoken prompt gets the same live rendering as a typed one.
+async function runChatTurn(text, images, fileTexts) {
+    const payload = {
+        message: text,
+        images: images,
+        file_texts: fileTexts
+    };
+
+    const thinkingDiv = document.createElement('div');
+    thinkingDiv.className = 'chat-bubble bubble-aura thinking';
+    thinkingDiv.innerHTML = '<span class="dot-pulse"></span><span class="dot-pulse d2"></span><span class="dot-pulse d3"></span>';
+    chatOutput.appendChild(thinkingDiv);
+    chatOutput.scrollTop = chatOutput.scrollHeight;
+
+    // Streaming transport by default; ?stream=off or window.AURA_STREAM_OFF
+    // falls back to the classic blocking endpoint.
+    const useStream = !window.AURA_STREAM_OFF &&
+        new URLSearchParams(window.location.search).get('stream') !== 'off';
+
+    let accumulatedText = '';
+
+    if (useStream) {
+        const res = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok || !res.body) throw new Error('Stream request failed (HTTP ' + res.status + ')');
+
+        thinkingDiv.remove();
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble bubble-aura';
+        const statusDiv = document.createElement('div');
+        statusDiv.className = 'stream-status';
+        statusDiv.style.cssText = 'font-size:10px;opacity:.65;margin:4px 0 8px 2px;letter-spacing:.4px;min-height:12px;';
+        chatOutput.appendChild(bubble);
+        chatOutput.appendChild(statusDiv);
+
+        let lastRender = 0;
+        let renderTimer = null;
+        let streamError = null;
+
+        const renderPartial = () => {
+            if (!accumulatedText) return;
+            if (window.marked && window.DOMPurify) {
+                bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+            } else {
+                bubble.textContent = accumulatedText;
+            }
+            chatOutput.scrollTop = chatOutput.scrollHeight;
+        };
+        // Throttle markdown re-rendering to ~150ms during streaming.
+        const scheduleRender = () => {
+            const now = Date.now();
+            const elapsed = now - lastRender;
+            if (elapsed >= 150) {
+                lastRender = now;
+                renderPartial();
+            } else if (!renderTimer) {
+                renderTimer = setTimeout(() => { renderTimer = null; scheduleRender(); }, 150 - elapsed);
+            }
+        };
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuf = '';
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            sseBuf += decoder.decode(value, { stream: true });
+            let sep;
+            while ((sep = sseBuf.indexOf('\n\n')) !== -1) {
+                const frame = sseBuf.slice(0, sep);
+                sseBuf = sseBuf.slice(sep + 2);
+                const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
+                if (!dataLine) continue;
+                let ev;
+                try { ev = JSON.parse(dataLine.slice(5).trim()); } catch (e) { continue; }
+
+                if (ev.type === 'token') {
+                    accumulatedText += ev.text || '';
+                    scheduleRender();
+                } else if (ev.type === 'tool_start') {
+                    statusDiv.textContent = 'Running ' + ev.tool + '\u2026';
+                } else if (ev.type === 'tool_result') {
+                    statusDiv.textContent = ev.tool + ' done.';
+                } else if (ev.type === 'permission_request') {
+                    statusDiv.textContent = 'Waiting for approval \u2014 ' + ev.tool + ' (' + ev.risk + '). Click AUTHORIZE in the panel or reply Yes.';
+                } else if (ev.type === 'meta') {
+                    // Intent info; no UI change needed yet.
+                } else if (ev.type === 'done') {
+                    accumulatedText = (typeof ev.text === 'string') ? ev.text : accumulatedText;
+                } else if (ev.type === 'error') {
+                    streamError = ev.message || 'Unknown pipeline error.';
+                }
+            }
+        }
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+
+        // Final render with syntax highlighting.
+        if (accumulatedText) {
+            if (window.marked && window.DOMPurify) {
+                bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+                if (window.hljs) {
+                    bubble.querySelectorAll('pre code').forEach((block) => {
+                        hljs.highlightElement(block);
+                    });
+                }
+            } else {
+                bubble.textContent = accumulatedText;
+            }
+        }
+        statusDiv.textContent = streamError ? ('Error: ' + streamError) : '';
+        setTimeout(() => statusDiv.remove(), streamError ? 10000 : 2000);
+        chatOutput.scrollTop = chatOutput.scrollHeight;
+
+        setAuraState('idle');
+
+        if (streamError) throw new Error(streamError);
+
+        if (accumulatedText) {
+            enhanceLatestBubble(accumulatedText);
+
+            const termDiv = document.createElement('div');
+            termDiv.className = 'aura-msg';
+            termDiv.textContent = accumulatedText;
+            terminalOutput.appendChild(termDiv);
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+
+            playTTS(accumulatedText);
+        } else {
+            await appendToTerminal('No response received.', 'error');
+        }
+    } else {
+        const response = await api('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            timeout: 300000 // agent may loop through tools for minutes
+        });
+
+        if (!response.ok) throw new Error('Network response was not ok');
+
+        const data = await response.json();
+        accumulatedText = (data && typeof data.response === 'string') ? data.response : '';
+
+        thinkingDiv.remove();
+        setAuraState('idle');
+
+        if (accumulatedText) {
+            const currentBubble = document.createElement('div');
+            currentBubble.className = 'chat-bubble bubble-aura';
+            chatOutput.appendChild(currentBubble);
+
+            if (window.marked && window.DOMPurify) {
+                currentBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+                if (window.hljs) {
+                    currentBubble.querySelectorAll('pre code').forEach((block) => {
+                        hljs.highlightElement(block);
+                    });
+                }
+            } else {
+                currentBubble.textContent = accumulatedText;
+            }
+            chatOutput.scrollTop = chatOutput.scrollHeight;
+
+            enhanceLatestBubble(accumulatedText);
+
+            const termDiv = document.createElement('div');
+            termDiv.className = 'aura-msg';
+            termDiv.textContent = accumulatedText;
+            terminalOutput.appendChild(termDiv);
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+
+            playTTS(accumulatedText);
+        } else {
+            await appendToTerminal('No response received.', 'error');
+        }
+    }
+
+    return accumulatedText;
+}
+
 commandInput.addEventListener('keydown', async (e) => {
     if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -992,184 +1183,11 @@ commandInput.addEventListener('keydown', async (e) => {
         setAuraState('processing');
 
         try {
-            const payload = {
-                message: text,
-                images: pendingAttachments.images.length > 0 ? pendingAttachments.images : null,
-                file_texts: pendingAttachments.file_texts.length > 0 ? pendingAttachments.file_texts : null
-            };
+            const images = pendingAttachments.images.length > 0 ? pendingAttachments.images : null;
+            const fileTexts = pendingAttachments.file_texts.length > 0 ? pendingAttachments.file_texts : null;
             clearAttachments();
 
-            const thinkingDiv = document.createElement('div');
-            thinkingDiv.className = 'chat-bubble bubble-aura thinking';
-            thinkingDiv.innerHTML = '<span class="dot-pulse"></span><span class="dot-pulse d2"></span><span class="dot-pulse d3"></span>';
-            chatOutput.appendChild(thinkingDiv);
-            chatOutput.scrollTop = chatOutput.scrollHeight;
-
-            // Streaming transport by default; ?stream=off or window.AURA_STREAM_OFF
-            // falls back to the classic blocking endpoint.
-            const useStream = !window.AURA_STREAM_OFF &&
-                new URLSearchParams(window.location.search).get('stream') !== 'off';
-
-            let accumulatedText = '';
-
-            if (useStream) {
-                const res = await fetch('/api/chat/stream', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (!res.ok || !res.body) throw new Error('Stream request failed (HTTP ' + res.status + ')');
-
-                thinkingDiv.remove();
-                const bubble = document.createElement('div');
-                bubble.className = 'chat-bubble bubble-aura';
-                const statusDiv = document.createElement('div');
-                statusDiv.className = 'stream-status';
-                statusDiv.style.cssText = 'font-size:10px;opacity:.65;margin:4px 0 8px 2px;letter-spacing:.4px;min-height:12px;';
-                chatOutput.appendChild(bubble);
-                chatOutput.appendChild(statusDiv);
-
-                let lastRender = 0;
-                let renderTimer = null;
-                let streamError = null;
-
-                const renderPartial = () => {
-                    if (!accumulatedText) return;
-                    if (window.marked && window.DOMPurify) {
-                        bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
-                    } else {
-                        bubble.textContent = accumulatedText;
-                    }
-                    chatOutput.scrollTop = chatOutput.scrollHeight;
-                };
-                // Throttle markdown re-rendering to ~150ms during streaming.
-                const scheduleRender = () => {
-                    const now = Date.now();
-                    const elapsed = now - lastRender;
-                    if (elapsed >= 150) {
-                        lastRender = now;
-                        renderPartial();
-                    } else if (!renderTimer) {
-                        renderTimer = setTimeout(() => { renderTimer = null; scheduleRender(); }, 150 - elapsed);
-                    }
-                };
-
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
-                let sseBuf = '';
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    sseBuf += decoder.decode(value, { stream: true });
-                    let sep;
-                    while ((sep = sseBuf.indexOf('\n\n')) !== -1) {
-                        const frame = sseBuf.slice(0, sep);
-                        sseBuf = sseBuf.slice(sep + 2);
-                        const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
-                        if (!dataLine) continue;
-                        let ev;
-                        try { ev = JSON.parse(dataLine.slice(5).trim()); } catch (e) { continue; }
-
-                        if (ev.type === 'token') {
-                            accumulatedText += ev.text || '';
-                            scheduleRender();
-                        } else if (ev.type === 'tool_start') {
-                            statusDiv.textContent = 'Running ' + ev.tool + '\u2026';
-                        } else if (ev.type === 'tool_result') {
-                            statusDiv.textContent = ev.tool + ' done.';
-                        } else if (ev.type === 'permission_request') {
-                            statusDiv.textContent = 'Waiting for approval \u2014 ' + ev.tool + ' (' + ev.risk + '). Click AUTHORIZE in the panel or reply Yes.';
-                        } else if (ev.type === 'meta') {
-                            // Intent info; no UI change needed yet.
-                        } else if (ev.type === 'done') {
-                            accumulatedText = (typeof ev.text === 'string') ? ev.text : accumulatedText;
-                        } else if (ev.type === 'error') {
-                            streamError = ev.message || 'Unknown pipeline error.';
-                        }
-                    }
-                }
-                if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
-
-                // Final render with syntax highlighting.
-                if (accumulatedText) {
-                    if (window.marked && window.DOMPurify) {
-                        bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
-                        if (window.hljs) {
-                            bubble.querySelectorAll('pre code').forEach((block) => {
-                                hljs.highlightElement(block);
-                            });
-                        }
-                    } else {
-                        bubble.textContent = accumulatedText;
-                    }
-                }
-                statusDiv.textContent = streamError ? ('Error: ' + streamError) : '';
-                setTimeout(() => statusDiv.remove(), streamError ? 10000 : 2000);
-                chatOutput.scrollTop = chatOutput.scrollHeight;
-
-                setAuraState('idle');
-
-                if (streamError) throw new Error(streamError);
-
-                if (accumulatedText) {
-                    enhanceLatestBubble(accumulatedText);
-
-                    const termDiv = document.createElement('div');
-                    termDiv.className = 'aura-msg';
-                    termDiv.textContent = accumulatedText;
-                    terminalOutput.appendChild(termDiv);
-                    terminalOutput.scrollTop = terminalOutput.scrollHeight;
-
-                    playTTS(accumulatedText);
-                } else {
-                    await appendToTerminal('No response received.', 'error');
-                }
-            } else {
-                const response = await api('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                    timeout: 300000 // agent may loop through tools for minutes
-                });
-
-                if (!response.ok) throw new Error('Network response was not ok');
-
-                const data = await response.json();
-                accumulatedText = (data && typeof data.response === 'string') ? data.response : '';
-
-                thinkingDiv.remove();
-                setAuraState('idle');
-
-                if (accumulatedText) {
-                    const currentBubble = document.createElement('div');
-                    currentBubble.className = 'chat-bubble bubble-aura';
-                    chatOutput.appendChild(currentBubble);
-
-                    if (window.marked && window.DOMPurify) {
-                        currentBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
-                        if (window.hljs) {
-                            currentBubble.querySelectorAll('pre code').forEach((block) => {
-                                hljs.highlightElement(block);
-                            });
-                        }
-                    } else {
-                        currentBubble.textContent = accumulatedText;
-                    }
-                    chatOutput.scrollTop = chatOutput.scrollHeight;
-
-                    enhanceLatestBubble(accumulatedText);
-
-                    const termDiv = document.createElement('div');
-                    termDiv.className = 'aura-msg';
-                    termDiv.textContent = accumulatedText;
-                    terminalOutput.appendChild(termDiv);
-                    terminalOutput.scrollTop = terminalOutput.scrollHeight;
-
-                    playTTS(accumulatedText);
-                } else {
-                    await appendToTerminal('No response received.', 'error');
-                }
-            }
+            await runChatTurn(text, images, fileTexts);
         } catch (error) {
             console.error('Chat error:', error);
             setAuraState('idle');
@@ -1204,15 +1222,12 @@ async function startVoiceInteraction() {
 
 // Open the mic once per interaction (reused across auto-continue turns).
 async function beginListen() {
-    if (micDenied) {
-        showMicDeniedBanner();
-        setAuraState('error');
-        disableVoiceOrb(true);
-        return;
+    // Attempt to open browser mic for canvas visualizer, but never block backend voice input
+    try {
+        await ensureMicOpen();
+    } catch (e) {
+        console.warn('Browser mic visualizer unavailable:', e);
     }
-
-    const opened = await ensureMicOpen();
-    if (!opened) return; // denial banner + error state already surfaced
 
     if (window.auraState === 'listening') return;
     setAuraState('listening');
@@ -1221,7 +1236,7 @@ async function beginListen() {
     startMicAnim();
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     try {
         const response = await api('/api/voice/listen', {
@@ -1236,15 +1251,30 @@ async function beginListen() {
 
         if (data.status === 'success' && data.transcription) {
             await appendToTerminal(data.transcription, 'user');
-            conversationModeArmed = !!(data.continue);
+            // The reply is fetched and streamed separately so a slow local model
+            // never delays appearance of the user's own words.
+            setAuraState('processing');
+            let reply = '';
+            try {
+                reply = (await runChatTurn(data.transcription, null, null)) || '';
+            } catch (e) {
+                console.error('Voice chat error:', e);
+                const msg = ConnectionMonitor.isOffline
+                    ? 'CONNECTION FAILED — backend unreachable.'
+                    : 'Request failed or timed out.';
+                await appendToTerminal(msg, 'error');
+                showToast('REQUEST FAILED', msg, 'error');
+            }
+            const autoListenEnabled = localStorage.getItem('aura_auto_listen') === 'true';
+            conversationModeArmed = autoListenEnabled && !!reply && reply.trim().endsWith('?');
             updateConversationIndicator(window.auraState);
-            await appendToTerminal(data.response, 'aura');
-            playTTS(data.response); // mic stays open for barge-in
+            // runChatTurn already played TTS; mic stays open for barge-in.
             if (!isTtsPlaying && !conversationModeArmed) closeMic();
         } else if (data.status === 'no_speech') {
             conversationModeArmed = false;
             updateConversationIndicator(window.auraState);
-            await appendToTerminal('No speech detected.', 'system');
+            // Settle quietly back to idle; do not spam terminal history
+            console.log('[VOICE] No speech detected; returning to idle.');
             closeMic();
         } else {
             conversationModeArmed = false;
@@ -1307,42 +1337,36 @@ function canStartListening() {
 
 function disableVoiceOrb(on) {
     if (!voiceBtn) return;
-    if (on) {
-        voiceBtn.setAttribute('aria-disabled', 'true');
-        voiceBtn.title = 'Microphone access denied — enable it in browser/site settings';
-    } else {
-        voiceBtn.removeAttribute('aria-disabled');
-        voiceBtn.title = 'Start voice interaction';
-    }
+    // Keep voice orb interactive so user can trigger backend listening anytime
+    voiceBtn.removeAttribute('aria-disabled');
+    voiceBtn.title = 'Start voice interaction';
 }
 
-// Acquire and wire the mic stream + analyser. Returns true on success; on
-// denial it surfaces the banner + error state and returns false (no throw).
+// Acquire and wire the mic stream + analyser for canvas visualizer only.
+// If browser mic permission is denied or unsupported, it gracefully returns false
+// without disabling or blocking the backend voice listener.
 async function ensureMicOpen() {
     if (micStream && micAnalyser && micAudioCtx && micAudioCtx.state !== 'closed') {
-        return true; // reuse the live stream across auto-continue turns
+        return true;
     }
     try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-        console.warn('Mic denied/unavailable:', err && err.name);
-        micDenied = true;
-        showMicDeniedBanner();
-        setAuraState('error');
-        disableVoiceOrb(true);
-        return false;
-    }
-    micDenied = false;
-    hideMicDeniedBanner();
-    disableVoiceOrb(false);
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micDenied = false;
+            hideMicDeniedBanner();
 
-    micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = micAudioCtx.createMediaStreamSource(micStream);
-    micAnalyser = micAudioCtx.createAnalyser();
-    micAnalyser.fftSize = 256;
-    source.connect(micAnalyser);
-    micDataArray = new Uint8Array(micAnalyser.frequencyBinCount);
-    return true;
+            micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = micAudioCtx.createMediaStreamSource(micStream);
+            micAnalyser = micAudioCtx.createAnalyser();
+            micAnalyser.fftSize = 256;
+            source.connect(micAnalyser);
+            micDataArray = new Uint8Array(micAnalyser.frequencyBinCount);
+            return true;
+        }
+    } catch (err) {
+        console.warn('Browser mic visualizer unavailable (backend listening active):', err && err.name);
+    }
+    return false;
 }
 
 function startMicAnim() {
@@ -1813,6 +1837,11 @@ function bindQuickActionsEditorButtons() {
     });
     
     document.getElementById('btn-save-quick-actions')?.addEventListener('click', saveQuickActions);
+    
+    // Replay onboarding setup
+    document.getElementById('btn-replay-onboard')?.addEventListener('click', () => {
+        if (window.Onboarding) window.Onboarding.reopen();
+    });
 }
 
 // Call this when Settings view becomes active
@@ -1822,18 +1851,30 @@ function initQuickActionsEditor() {
 }
 
 async function refreshScreenPreview() {
+    const img = document.getElementById('screen-preview-img');
+    const container = document.getElementById('screen-preview-container');
+    const span = container?.querySelector('.screen-preview-empty-text');
+    if (!img || !container) return;
+
     try {
-        const res = await api(`/api/captures/last_screen?t=${Date.now()}`, { method: 'HEAD' });
-        if (!res.ok) return;
-        const img = document.getElementById('screen-preview-img');
-        const container = document.getElementById('screen-preview-container');
-        const span = container?.querySelector('.screen-preview-empty-text');
-        if (img && container) {
-            img.src = `/api/captures/last_screen?t=${Date.now()}`;
+        const res = await api(`/api/captures/last_screen?t=${Date.now()}`, { method: 'HEAD', noThrow: true });
+        if (!res.ok) {
+            img.style.display = 'none';
+            if (span) span.style.display = 'block';
+            container.classList.remove('has-image');
+            return;
+        }
+        img.onload = () => {
             img.style.display = 'block';
             if (span) span.style.display = 'none';
             container.classList.add('has-image');
-        }
+        };
+        img.onerror = () => {
+            img.style.display = 'none';
+            if (span) span.style.display = 'block';
+            container.classList.remove('has-image');
+        };
+        img.src = `/api/captures/last_screen?t=${Date.now()}`;
     } catch (e) {}
 }
 
@@ -2319,6 +2360,10 @@ async function consumeNotifications() {
 
         if (data.has_notification && data.message) {
             if (data.message === '__WAKE_WORD__') {
+                if (Date.now() < wakeTestUntil) {
+                    // Suppress launching full voice session while user is actively running the wake-word test
+                    return;
+                }
                 if (wakeWordActive && canStartListening() && voiceBtn) voiceBtn.click();
                 return;
             }
@@ -2858,6 +2903,19 @@ fetchSecurity();
 // ═══════════════════════════════════════════════════════════
 const logOutput = document.getElementById('log-output');
 const btnLogRefresh = document.getElementById('btn-log-refresh');
+const btnLogServer = document.getElementById('btn-log-server');
+const btnLogAgent = document.getElementById('btn-log-agent');
+let currentLogSource = 'server';
+
+function setLogSource(source) {
+    currentLogSource = source;
+    btnLogServer?.classList.toggle('active', source === 'server');
+    btnLogAgent?.classList.toggle('active', source === 'agent');
+    fetchLogs(true);
+}
+
+btnLogServer?.addEventListener('click', () => setLogSource('server'));
+btnLogAgent?.addEventListener('click', () => setLogSource('agent'));
 
 function applyLogsData(data, manual = false) {
     if (!logOutput || !data) return;
@@ -2867,12 +2925,15 @@ function applyLogsData(data, manual = false) {
         data.lines.forEach(line => {
             const div = document.createElement('div');
             div.className = 'log-line';
+            if (line.includes('ERROR') || line.includes('error') || line.includes('failed') || line.includes('Fatal')) {
+                div.classList.add('log-error');
+            }
             div.textContent = line;
             logOutput.appendChild(div);
         });
         if (nearBottom || manual) logOutput.scrollTop = logOutput.scrollHeight;
     } else if (manual) {
-        logOutput.innerHTML = '<div class="log-line log-error">[ERROR] Failed to read logs.</div>';
+        logOutput.innerHTML = `<div class="log-line log-error">[ERROR] ${data.message || 'Failed to read logs.'}</div>`;
     }
 }
 
@@ -2880,7 +2941,7 @@ async function fetchLogs(manual = false) {
     if (!logOutput) return;
     if (!manual && (document.hidden || !isViewActive('system'))) return;
     try {
-        const res = await api('/api/logs', { timeout: 8000 });
+        const res = await api(`/api/logs?source=${encodeURIComponent(currentLogSource)}`, { timeout: 8000 });
         applyLogsData(await res.json(), manual);
     } catch (e) {
         if (manual) {
@@ -3011,6 +3072,237 @@ async function fetchActivePlan() {
         applyPlan(data.plan || null);
     } catch (e) {}
 }
+
+// ═══════════════════════════════════════════════════════════
+// ONBOARDING OVERLAY — first-run health checklist
+// ═══════════════════════════════════════════════════════════
+(function () {
+    const ONBOARDED_KEY = 'aura-onboarded';
+    const THEME_KEY = 'aura-theme-v2';
+    const THEMES = ['default', 'crimson', 'emerald', 'violet'];
+
+    // Row definitions: id, label, checker fn, action {label, handler}
+    const ROWS = [
+        {
+            id: 'backend',
+            label: 'Backend online',
+            check: async () => {
+                const res = await fetch('/api/health', { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (!data.ok) throw new Error('Backend not OK');
+                return { ok: true };
+            },
+            action: { label: 'Retry', handler: () => runRowCheck('backend') }
+        },
+        {
+            id: 'ollama',
+            label: 'Ollama reachable',
+            check: async () => {
+                const res = await fetch('/api/health/ollama', { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || 'Ollama unreachable');
+                return { ok: true, model: data.model, latency: data.latency_ms };
+            },
+            action: { label: 'Retry', handler: () => runRowCheck('ollama') }
+        },
+        {
+            id: 'mic',
+            label: 'Microphone access',
+            check: async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(t => t.stop());
+                    return { ok: true };
+                } catch (e) {
+                    throw new Error(e.name === 'NotAllowedError' ? 'Permission denied' : 'Microphone unavailable');
+                }
+            },
+            action: { label: 'Enable', handler: () => runRowCheck('mic') }
+        },
+        {
+            id: 'wakeword',
+            label: 'Wake word ready',
+            check: async () => {
+                const res = await fetch('/api/wakeword/status', { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (!data.enabled) throw new Error('Wake word disabled in Settings');
+                if (!data.model_loaded) throw new Error(data.error || 'Model not loaded');
+                return { ok: true };
+            },
+            action: { label: 'Open Settings', handler: () => { closeOnboard(); switchView('settings'); } }
+        },
+        {
+            id: 'theme',
+            label: 'Pick your accent theme',
+            check: async () => {
+                // Always "pass" — this row is for selection, not validation
+                const current = localStorage.getItem(THEME_KEY) || 'default';
+                return { ok: true, theme: current };
+            },
+            action: { label: 'Cycle', handler: cycleTheme }
+        }
+    ];
+
+    let overlay = null;
+    let checklistEl = null;
+    let enterBtn = null;
+    let rowStates = {}; // id -> 'pending'|'checking'|'pass'|'fail'
+    let rowResults = {}; // id -> result data
+    let backendResolved = false;
+
+    function createRowEl(row) {
+        const div = document.createElement('div');
+        div.className = 'onboard-row';
+        div.dataset.id = row.id;
+        div.dataset.state = 'pending';
+        div.innerHTML = `
+            <div class="onboard-status-badge" aria-hidden="true">
+                <span class="badge-pending">WAIT</span>
+                <span class="badge-checking">CHECK</span>
+                <span class="badge-pass">READY</span>
+                <span class="badge-fail">ERROR</span>
+            </div>
+            <span class="onboard-label">${escapeHtml(row.label)}</span>
+            ${row.action ? `<button class="qa-btn onboard-action" data-action="${row.id}">${escapeHtml(row.action.label)}</button>` : ''}
+        `;
+        return div;
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":"'"}[c]));
+    }
+
+    function setRowState(id, state, result) {
+        rowStates[id] = state;
+        if (result) rowResults[id] = result;
+        const rowEl = checklistEl.querySelector(`[data-id="${id}"]`);
+        if (!rowEl) return;
+        rowEl.dataset.state = state;
+        const actionBtn = rowEl.querySelector('.onboard-action');
+        if (actionBtn) {
+            actionBtn.hidden = state === 'pass' && id !== 'theme';
+        }
+        updateEnterButton();
+    }
+
+    function updateEnterButton() {
+        if (enterBtn) {
+            enterBtn.disabled = !backendResolved;
+        }
+    }
+
+    async function runRowCheck(id) {
+        const row = ROWS.find(r => r.id === id);
+        if (!row) return;
+        setRowState(id, 'checking');
+        try {
+            const result = await row.check();
+            setRowState(id, 'pass', result);
+            if (id === 'backend') backendResolved = true;
+        } catch (e) {
+            setRowState(id, 'fail', { error: e.message });
+            if (id === 'backend') backendResolved = true; // allow dismiss even if backend fails
+        }
+    }
+
+    function cycleTheme() {
+        const current = localStorage.getItem(THEME_KEY) || 'default';
+        const idx = THEMES.indexOf(current);
+        const next = THEMES[(idx + 1) % THEMES.length];
+        localStorage.setItem(THEME_KEY, next);
+        applyTheme(next);
+        setRowState('theme', 'pass', { theme: next });
+    }
+
+    function applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        // Update theme dots in Settings if visible
+        document.querySelectorAll('.theme-dot').forEach(dot => {
+            dot.classList.toggle('active', dot.dataset.theme === theme);
+        });
+    }
+
+    function buildOverlay() {
+        overlay = document.getElementById('onboard-overlay');
+        checklistEl = document.getElementById('onboard-checklist');
+        enterBtn = document.getElementById('onboard-enter');
+
+        // Populate checklist
+        ROWS.forEach(row => {
+            checklistEl.appendChild(createRowEl(row));
+        });
+
+        // Delegate action buttons
+        checklistEl.addEventListener('click', e => {
+            const btn = e.target.closest('.onboard-action');
+            if (btn) {
+                const id = btn.dataset.action;
+                const row = ROWS.find(r => r.id === id);
+                if (row?.action?.handler) row.action.handler();
+            }
+        });
+
+        // Enter button
+        enterBtn.addEventListener('click', () => {
+            closeOnboard();
+        });
+
+        // ESC handling — only dismiss if backend row resolved
+        overlay._escHandler = (e) => {
+            if (e.key === 'Escape' && backendResolved) {
+                closeOnboard();
+            }
+        };
+    }
+
+    function openOnboard() {
+        if (!overlay) buildOverlay();
+        // Reset states
+        rowStates = {};
+        rowResults = {};
+        backendResolved = false;
+        ROWS.forEach(r => setRowState(r.id, 'pending'));
+        updateEnterButton();
+
+        // Ensure ESC key listener is attached whenever overlay opens
+        if (overlay._escHandler) {
+            document.removeEventListener('keydown', overlay._escHandler);
+            document.addEventListener('keydown', overlay._escHandler);
+        }
+
+        overlay.hidden = false;
+        document.body.style.overflow = 'hidden';
+
+        // Run all checks in parallel
+        ROWS.forEach(r => runRowCheck(r.id));
+    }
+
+    function closeOnboard() {
+        if (!overlay) return;
+        overlay.hidden = true;
+        document.body.style.overflow = '';
+        localStorage.setItem(ONBOARDED_KEY, 'true');
+        if (overlay._escHandler) {
+            document.removeEventListener('keydown', overlay._escHandler);
+        }
+    }
+
+    // Public API
+    window.Onboarding = {
+        init: () => {
+            if (!localStorage.getItem(ONBOARDED_KEY)) {
+                // Small delay so boot overlay finishes first
+                setTimeout(openOnboard, 800);
+            }
+        },
+        reopen: () => {
+            openOnboard();
+        }
+    };
+})();
 
 function initPlans() {
     if (!document.getElementById('plan-card')) return;
@@ -3205,6 +3497,8 @@ Realtime.on('security_update', applySecurity);
 setTimeout(loadHistory, 1500);
 initPlans();
 initMedia();
+// First-run onboarding (checks onboarding flag, shows overlay if needed)
+if (window.Onboarding) window.Onboarding.init();
 fetchSchedule();          // one-shot initial paint; the bus maintains from here
 fetchNetworkScan();
 fetchProcesses();

@@ -814,7 +814,9 @@ ACCEPTANCE CRITERIA
 
 COMMIT
 feat(ui): configurable quick actions backed by JSON config with Settings editor
-```
+
+
+now running upar wala dekho ky hota h```
 
 ### Task 17 — Voice-flow polish
 Depends on: T0 (best after T7/T8 so states ride the realtime layer)
@@ -857,6 +859,9 @@ ACCEPTANCE CRITERIA
 COMMIT
 feat(voice): conversation-mode indicators, barge-in feedback, TTS queueing, hardened error states
 ```
+done
+
+
 
 ### Task 18 — First-run onboarding checklist
 Depends on: T0 (ideally after T13/T15/T16 so checks reflect final features)

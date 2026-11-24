@@ -1,22 +1,23 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# Python / Bytecode / Caches
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 **/__pycache__/
 **/*.pyc
+*.so
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
 
-# Wakeword Training Datasets and Large Binary Features
-wakeword_training/
-*.npy
-
-# Agent and MCP Test Artifacts / Run State
-.mimosa/
-.playwright-mcp/
-.zcode/
-static/.mimosa/
-
-# Environment
-.env
+# ==============================================================================
+# Virtual Environments
+# ==============================================================================
 .venv/
 env/
 venv/
@@ -24,21 +25,136 @@ ENV/
 env.bak/
 venv.bak/
 
-# Log files
+# ==============================================================================
+# Environment & Secrets
+# ==============================================================================
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.cert
+secrets.json
+credentials.json
+token.json
+
+# ==============================================================================
+# AI & Speech Models (Large Neural Weights / Offline Downloads)
+# ==============================================================================
+# Offline Neural Voice (Kokoro-82M ONNX model ~325MB, voices.json ~30MB)
+models/kokoro/
+
+# ONNX external tensor weights and large model checkpoints
+*.onnx.data
+*.data
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+
+# Model backups, experiments, and intermediate exports in models/
+models/*_backup*
+models/*backup*
+models/*_pre_*
+models/*_v9*
+models/*_web_*
+models/backups/
+
+# Keep production wake-word models explicitly tracked
+!models/hey_aura.onnx
+!models/hey_aura_previous.onnx
+
+# NumPy feature arrays
+*.npy
+*.npz
+
+# ==============================================================================
+# Wake-Word Training Datasets & Lab Sandboxes
+# ==============================================================================
+# Training datasets, ambient noise recordings, and mined audio
+wakeword_training/
+
+# Wake-word sandbox lab (contains ambient/user audio recordings & duplicate models)
+wakeword_lab/
+
+# Temporary audio files created during TTS or microphone recording
+aura_tts_output.*
+aura_temp_audio_*
+*.wav.tmp
+*.mp3.tmp
+
+# ==============================================================================
+# Captures, Screenshots & Media Dumps
+# ==============================================================================
+captures/
+static/captures/
+*.png.bak
+
+# ==============================================================================
+# Backup & Archive Directories
+# ==============================================================================
+backups/
+*.bak
+*.backup
+*.old
+*.orig
+
+# ==============================================================================
+# Binary Installers & Large Archives
+# ==============================================================================
+*.exe
+*.msi
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+
+# ==============================================================================
+# Agent, MCP, Node & Tool Run State
+# ==============================================================================
+.mimosa/
+.opencode/
+.playwright-mcp/
+.zcode/
+static/.mimosa/
+node_modules/
+.npm/
+.agent/
+.gemini/
+
+# ==============================================================================
+# Logs & Console Dumps
+# ==============================================================================
 *.log
 aura_agent.log
+aura_backend_console.log
+uvicorn_run.log
+uvicorn_test.log
 
-# Memory / State (optional, if you don't want to track conversation history in git)
+# ==============================================================================
+# Runtime State & Memory (Optional: uncomment to avoid tracking personal state)
+# ==============================================================================
 # memory.json
+# ltm_db.json
 # long_term_memory.json
+# plans.json
+# schedule.json
+# goals.json
+# proactive_config.json
 
-# IDEs
+# ==============================================================================
+# IDEs & Code Editors
+# ==============================================================================
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS
+# ==============================================================================
+# Operating System Files
+# ==============================================================================
 .DS_Store
 Thumbs.db
-
+desktop.ini

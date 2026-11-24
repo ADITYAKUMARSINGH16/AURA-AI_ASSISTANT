@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, Response
 from pydantic import BaseModel
 import warnings
 
@@ -8,9 +8,29 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
+# ─── CRITICAL: Import onnxruntime/openwakeword BEFORE any WinRT/COM modules ───
+# WinRT (winsdk/winrt) initializes COM which breaks onnxruntime's DLL loading on Windows.
+# Importing onnxruntime first ensures its native libraries load correctly.
+import onnxruntime  # noqa: F401
+try:
+    import openwakeword  # noqa: F401
+except Exception as _oww_err:
+    import logging as _logging
+    _logging.warning(f"Optional openwakeword top-level import skipped: {_oww_err}")
+
 import psutil
 import logging
 import os
+
+# Ensure server-side logs are persistently captured to aura_backend_console.log
+_console_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aura_backend_console.log")
+try:
+    _server_file_handler = logging.FileHandler(_console_log_path, encoding="utf-8")
+    _server_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logging.getLogger().addHandler(_server_file_handler)
+    logging.getLogger().setLevel(logging.INFO)
+except Exception as _log_setup_err:
+    pass
 
 from agent import create_agent
 from voice import speak, listen, generate_tts_file, start_wakeword_listener
@@ -83,6 +103,11 @@ def wake_word_callback():
     # out of nowhere the next time a HUD tab loads.
     _wake_signal_times.put(time.time())
     push_notification("__WAKE_WORD__")
+    try:
+        from backend.event_bus import publish_now
+        publish_now("notifications_update", {"available": True})
+    except Exception:
+        pass
 
 # Start background wake word listener
 start_wakeword_listener(wake_word_callback)
@@ -101,25 +126,32 @@ async def get_history():
     history = [msg for msg in agent.messages if msg.get("role") in ("user", "assistant")]
     return history  # Return as a plain JSON array
 
-def _logs_payload():
+def _logs_payload(source: str = "server"):
     import os
-    log_file = "aura_agent.log"
+    if source.lower() == "agent":
+        log_file = "aura_agent.log"
+    else:
+        # Default to server console log, with fallbacks
+        candidates = ["aura_backend_console.log", "uvicorn_run.log", "aura_agent.log"]
+        log_file = next((f for f in candidates if os.path.exists(f) and os.path.getsize(f) > 0), "aura_backend_console.log")
+
     if not os.path.exists(log_file):
-        return {"status": "error", "message": "Log file not found."}
+        return {"status": "error", "source": source, "message": f"Log file '{log_file}' not found.", "lines": []}
     try:
-        with open(log_file, "r", encoding="utf-8") as f:
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-        # Return last 50 lines
-        return {"status": "success", "lines": lines[-50:]}
+        # Return last 100 lines stripped of trailing CRLF
+        clean_lines = [line.rstrip("\r\n") for line in lines[-100:]]
+        return {"status": "success", "source": source, "file": log_file, "lines": clean_lines}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "source": source, "message": str(e), "lines": []}
 
 async def collect_logs_data():
-    return _logs_payload()
+    return await asyncio.to_thread(_logs_payload, "server")
 
 @app.get("/api/logs")
-async def get_logs():
-    return await collect_logs_data()
+async def get_logs(source: str = "server"):
+    return await asyncio.to_thread(_logs_payload, source)
 
 def _telemetry_payload():
     cpu = psutil.cpu_percent(interval=None)
@@ -254,14 +286,19 @@ async def chat_stream_endpoint(req: ChatRequest):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
 
-@app.get("/api/captures/last_screen")
-async def get_last_screen():
+@app.api_route("/api/captures/last_screen", methods=["GET", "HEAD"])
+async def get_last_screen(request: Request):
     """Serves the last screen capture from outside the web-served static directory."""
     import os
     path = os.path.join("captures", "last_screen.png")
     if os.path.exists(path):
+        if request.method == "HEAD":
+            return Response(status_code=200)
         return FileResponse(path, media_type="image/png")
-    return {"status": "error", "message": "No screen capture available yet."}
+    if request.method == "HEAD":
+        return Response(status_code=404)
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="No screen capture available yet.")
 
 def _permissions_payload():
     from permissions import get_pending_actions, TRUSTED_AUTOMATION_ENABLED
@@ -307,23 +344,30 @@ async def set_trusted_mode(req: Request):
 def tts(text: str):
     import os
     if not text:
-        return {"error": "No text provided"}
+        return Response(status_code=204)
     if len(text) > 2000:
         # Bound synthesis time and temp-file size; spoken replies don't need
         # unbounded input from a query parameter.
         text = text[:2000]
     
-    # Generate the TTS file (blocking, so this endpoint runs in a threadpool)
-    filepath = generate_tts_file(text)
-    
-    if filepath and os.path.exists(filepath):
-        media_type = "audio/mpeg" if filepath.lower().endswith(".mp3") else "audio/wav"
-        return FileResponse(filepath, media_type=media_type)
-    return {"error": "Failed to generate TTS"}
+    try:
+        # Generate the TTS file (blocking, so this endpoint runs in a threadpool)
+        filepath = generate_tts_file(text)
+        if filepath and os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+            media_type = "audio/mpeg" if filepath.lower().endswith(".mp3") else "audio/wav"
+            return FileResponse(filepath, media_type=media_type)
+    except Exception as e:
+        logging.error(f"TTS endpoint error: {e}")
+
+    return Response(status_code=204)
 
 @app.post("/api/voice/listen")
 def voice_listen(background_tasks: BackgroundTasks):
-    # listen() blocks on the microphone for seconds, so this must NOT be an async handler
+    # listen() blocks on the microphone for seconds, so this must NOT be an async handler.
+    # We return ONLY the transcription here and let the frontend stream the answer via
+    # /api/chat/stream. Generating the response server-side used to add the full LLM
+    # round-trip to this one request, which routinely exceeded the client's timeout —
+    # so the reply was persisted to memory but never rendered live.
     text = listen()
     
     if text == "SWITCH_TO_TEXT_MODE":
@@ -332,20 +376,9 @@ def voice_listen(background_tasks: BackgroundTasks):
         # Silence is a normal outcome, not an error
         return {"status": "no_speech", "message": "No speech detected."}
     
-    # We got speech — now send it through the agent
-    with agent_lock:
-        response_text = agent.send_message(text)
-    
-    # Speak the response (handled by frontend now)
-    
-    # Check if conversation should continue (if it ends with a question mark)
-    continue_conv = response_text.strip().endswith('?')
-    
     return {
         "status": "success",
         "transcription": text,
-        "response": response_text,
-        "continue": continue_conv
     }
 
 @app.post("/api/voice/stop")
@@ -384,6 +417,58 @@ async def toggle_wakeword(req: WakeWordStatus):
 async def wakeword_status():
     import voice
     return voice.get_wakeword_status()
+
+
+# ─── Health Endpoints ───
+# Lightweight checks for the onboarding overlay. Never throw; always return JSON.
+
+_ollama_health_cache = {"data": None, "ts": 0.0}
+
+@app.get("/api/health")
+async def health_check():
+    """Trivial liveness probe — returns immediately."""
+    return {"ok": True}
+
+@app.get("/api/health/ollama")
+async def health_ollama():
+    """Check Ollama reachability and default model with a 3s timeout.
+    Cached for 30s to avoid hammering Ollama on rapid reloads.
+    """
+    import time
+    import ollama
+    now = time.time()
+    # Return cached result if fresh (<30s)
+    if _ollama_health_cache["data"] and (now - _ollama_health_cache["ts"]) < 30:
+        return _ollama_health_cache["data"]
+
+    # Fresh check with 3s timeout
+    start = time.perf_counter()
+    try:
+        # ollama.list() is fast; wrap in asyncio.to_thread with timeout
+        async def _list_models():
+            return await asyncio.to_thread(ollama.list)
+
+        try:
+            result = await asyncio.wait_for(_list_models(), timeout=3.0)
+        except asyncio.TimeoutError:
+            raise TimeoutError("Ollama list() timed out after 3s")
+
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        models = result.get("models", []) if isinstance(result, dict) else []
+        # Pick the configured model or first available
+        from config import OLLAMA_MODEL
+        model_name = OLLAMA_MODEL
+        if models and not any(m.get("name") == model_name for m in models):
+            model_name = models[0].get("name", model_name)
+
+        data = {"ok": True, "model": model_name, "latency_ms": latency_ms}
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        data = {"ok": False, "model": None, "latency_ms": latency_ms, "error": str(e)}
+
+    _ollama_health_cache["data"] = data
+    _ollama_health_cache["ts"] = now
+    return data
 
 
 @app.post("/api/voice/wake_and_listen")
@@ -1233,15 +1318,18 @@ scheduler_thread.start()
 import os
 os.makedirs("static", exist_ok=True)
 
-# The HUD is the application — serve it at root. The marketing page moves
-# to /welcome. Registered BEFORE the StaticFiles mount so they win.
+# Landing page at root and /welcome, HUD at /hud
 @app.get("/", include_in_schema=False)
-async def serve_hud_root():
-    return FileResponse("static/hud.html")
+async def serve_landing():
+    return FileResponse("static/welcome.html")
 
 @app.get("/welcome", include_in_schema=False)
 async def serve_welcome():
     return FileResponse("static/welcome.html")
+
+@app.get("/hud", include_in_schema=False)
+async def serve_hud():
+    return FileResponse("static/hud.html")
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

@@ -1,6 +1,7 @@
 import speech_recognition as sr
 import sounddevice as sd
 import scipy.io.wavfile as wav
+import numpy as np
 import tempfile
 import os
 import subprocess
@@ -8,6 +9,12 @@ import re
 import time
 import uuid
 import asyncio
+import logging
+import collections
+from dotenv import load_dotenv
+
+# Ensure .env is loaded for standalone or module usage
+load_dotenv()
 
 # ──────────── TTS Configuration ────────────
 # We try edge-tts first (high-quality neural voice).
@@ -21,14 +28,21 @@ import asyncio
 #   en-GB-RyanNeural      - Male, British
 #   en-IN-PrabhatNeural   - Male, Indian English
 
-EDGE_TTS_VOICE = "en-US-AriaNeural"
-EDGE_TTS_RATE = "+0%"
+EDGE_TTS_VOICE = os.environ.get("AURA_TTS_VOICE", "en-US-AriaNeural")
+EDGE_TTS_RATE = os.environ.get("AURA_TTS_RATE", "+0%")
 
 _TEMP_DIR = tempfile.gettempdir()
 _TTS_PATH = os.path.join(_TEMP_DIR, "aura_tts_output.mp3")
 
 # Global state to prevent self-triggering and allow barge-in
 is_speaking = False
+_is_listening_active = False
+
+# Rolling ring buffer for one-shot command continuity and live telemetry
+_preroll_audio_ring = collections.deque(maxlen=20)
+_last_wakeword_preroll = None
+_last_wakeword_preroll_ts = 0.0
+_last_inference_latency_ms = 0.0
 
 # Echo-guard state: what AURA last said aloud and when she finished saying it.
 # Used so the microphone never mistakes her own TTS for a user request.
@@ -81,6 +95,133 @@ def stop_speaking():
         _mark_speech_end()
 
 
+# ──────────── Audio Normalization & Acoustic Analysis ────────────
+
+def normalize_audio(audio_data: np.ndarray, target_peak: float = 26000.0) -> np.ndarray:
+    """Normalizes int16 audio array to target peak amplitude to boost low-volume speech."""
+    if len(audio_data) == 0:
+        return audio_data
+    max_val = float(np.max(np.abs(audio_data)))
+    if 0 < max_val < target_peak:
+        gain = target_peak / max_val
+        gain = min(gain, 4.0)  # Safe gain ceiling to prevent amplifying noise floor excessively
+        normalized = np.clip(audio_data.astype(np.float32) * gain, -32768, 32767).astype(np.int16)
+        return normalized
+    return audio_data
+
+
+def compute_acoustic_features(audio_samples: np.ndarray, sample_rate: int = 16000) -> dict:
+    """Extracts lightweight acoustic features: F0 (pitch), spectral centroid, and spectral tilt."""
+    if audio_samples.ndim > 1:
+        samples = audio_samples.flatten()
+    else:
+        samples = audio_samples
+    if len(samples) < 256:
+        return {"f0_hz": 0.0, "spectral_centroid": 0.0, "energy_rms": 0.0}
+    
+    samples_f = samples.astype(np.float32)
+    rms = float(np.sqrt(np.mean(samples_f ** 2)))
+    if rms < 1e-4:
+        return {"f0_hz": 0.0, "spectral_centroid": 0.0, "energy_rms": 0.0}
+
+    # 1. Pitch estimation (F0) via autocorrelation within human vocal pitch [70 Hz, 400 Hz]
+    min_lag = int(sample_rate / 400)
+    max_lag = int(sample_rate / 70)
+    
+    center_len = min(2048, len(samples_f))
+    start_idx = (len(samples_f) - center_len) // 2
+    segment = samples_f[start_idx : start_idx + center_len]
+    segment = segment - np.mean(segment)
+    
+    f0 = 0.0
+    if len(segment) >= max_lag:
+        autocorr = np.correlate(segment, segment, mode='full')
+        autocorr = autocorr[len(autocorr)//2 :]
+        search_range = autocorr[min_lag : min_lag + (max_lag - min_lag)]
+        if len(search_range) > 0 and np.max(search_range) > 0.3 * autocorr[0]:
+            peak_lag = min_lag + int(np.argmax(search_range))
+            f0 = float(sample_rate / peak_lag)
+            
+    # 2. Spectral Centroid via FFT
+    fft_vals = np.abs(np.fft.rfft(segment))
+    freqs = np.fft.rfftfreq(len(segment), 1.0 / sample_rate)
+    sum_fft = np.sum(fft_vals)
+    centroid = float(np.sum(freqs * fft_vals) / sum_fft) if sum_fft > 0 else 0.0
+
+    return {
+        "f0_hz": round(f0, 1),
+        "spectral_centroid": round(centroid, 1),
+        "energy_rms": round(rms, 1)
+    }
+
+
+def verify_speaker_voiceprint(features: dict, reference_profile: dict = None, tolerance: float = 0.35) -> bool:
+    """Verifies if extracted acoustic features match the enrolled reference profile.
+    If no reference profile exists or speaker verification is disabled, returns True (pass-through)."""
+    if not reference_profile:
+        return True
+    ref_f0 = reference_profile.get("f0_hz", 0.0)
+    ref_centroid = reference_profile.get("spectral_centroid", 0.0)
+    
+    if ref_f0 > 50 and features.get("f0_hz", 0.0) > 50:
+        f0_diff = abs(features["f0_hz"] - ref_f0) / ref_f0
+        if f0_diff > tolerance:
+            return False
+            
+    if ref_centroid > 200 and features.get("spectral_centroid", 0.0) > 200:
+        centroid_diff = abs(features["spectral_centroid"] - ref_centroid) / ref_centroid
+        if centroid_diff > (tolerance * 1.5):
+            return False
+            
+    return True
+
+
+def _load_speaker_profile() -> dict:
+    """Loads enrolled speaker voiceprint if available, or returns empty dict."""
+    try:
+        import json
+        profile_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "speaker_voiceprint.json")
+        if os.path.exists(profile_path):
+            with open(profile_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def benchmark_onnx_inference(model_path: str = None, iterations: int = 50) -> dict:
+    """Profiles ONNX inference latency for an 80ms chunk (1280 samples at 16kHz)."""
+    if not model_path:
+        model_path = _get_wakeword_model_path()
+    if not model_path or not os.path.exists(model_path):
+        return {"error": "model_not_found"}
+        
+    try:
+        from openwakeword.model import Model
+        framework = "onnx" if model_path.lower().endswith(".onnx") else "tflite"
+        test_model = Model(wakeword_models=[model_path], inference_framework=framework)
+        
+        dummy_chunk = np.zeros(1280, dtype=np.int16)
+        for _ in range(5):
+            test_model.predict(dummy_chunk)
+            
+        latencies = []
+        for _ in range(iterations):
+            t0 = time.perf_counter()
+            test_model.predict(dummy_chunk)
+            latencies.append((time.perf_counter() - t0) * 1000.0)
+            
+        return {
+            "iterations": iterations,
+            "avg_ms": round(float(np.mean(latencies)), 2),
+            "min_ms": round(float(np.min(latencies)), 2),
+            "max_ms": round(float(np.max(latencies)), 2),
+            "p95_ms": round(float(np.percentile(latencies, 95)), 2),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ──────────── Detect available TTS engine ────────────
 _use_edge_tts = False
 _pyttsx3_engine = None
@@ -107,14 +248,52 @@ except ImportError:
     except Exception as e:
         print(f"[TTS] WARNING: No TTS engine available: {e}")
 
+# ──────────── Local Neural Voice Engine (Kokoro-82M) ────────────
+_kokoro_instance = None
+_kokoro_model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "kokoro")
+_kokoro_model_path = os.path.join(_kokoro_model_dir, "kokoro-v0_19.onnx")
+_kokoro_voices_path = os.path.join(_kokoro_model_dir, "voices.json")
+
+
+def _init_kokoro():
+    global _kokoro_instance
+    if _kokoro_instance is not None:
+        return _kokoro_instance
+    if os.path.exists(_kokoro_model_path) and os.path.exists(_kokoro_voices_path):
+        try:
+            import kokoro_onnx
+            _kokoro_instance = kokoro_onnx.Kokoro(_kokoro_model_path, _kokoro_voices_path)
+            print("[TTS] Kokoro-ONNX offline neural engine loaded.")
+            return _kokoro_instance
+        except Exception as e:
+            logging.warning(f"[TTS] Failed to initialize Kokoro-ONNX: {e}")
+    return None
+
+
+def _speak_kokoro(text: str, voice_name: str = "af_heart") -> bool:
+    """Speaks using Kokoro-82M offline neural voice."""
+    kokoro = _init_kokoro()
+    if not kokoro:
+        return False
+    try:
+        import soundfile as sf
+        samples, sample_rate = kokoro.create(text, voice=voice_name, speed=1.0, lang="en-us")
+        wav_path = _TTS_PATH.replace(".mp3", ".wav")
+        sf.write(wav_path, samples, sample_rate)
+        _play_mp3(wav_path)
+        return True
+    except Exception as e:
+        logging.warning(f"[TTS] Kokoro synthesis error ({e}).")
+        return False
+
 
 def _cleanup_stale_tts_files(max_age_seconds: int = 3600):
-    """Deletes aura_tts_*.mp3 files older than max_age_seconds from the temp
-    directory. Without this, every spoken reply leaves a permanent mp3 behind."""
+    """Deletes aura_tts_* files older than max_age_seconds from the temp
+    directory. Without this, every spoken reply leaves a permanent file behind."""
     try:
         now = time.time()
         for name in os.listdir(_TEMP_DIR):
-            if name.startswith("aura_tts_") and name.endswith(".mp3"):
+            if name.startswith("aura_tts_") and (name.endswith(".mp3") or name.endswith(".wav")):
                 path = os.path.join(_TEMP_DIR, name)
                 try:
                     if now - os.path.getmtime(path) > max_age_seconds:
@@ -125,83 +304,242 @@ def _cleanup_stale_tts_files(max_age_seconds: int = 3600):
         pass
 
 
+def _synth_sapi_file(text: str, filepath: str) -> bool:
+    """Synthesizes text to a WAV file using native Windows SAPI (offline, zero-network)."""
+    try:
+        import pythoncom
+        import win32com.client
+        pythoncom.CoInitialize()
+        try:
+            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            filestream = win32com.client.Dispatch("SAPI.SpFileStream")
+            filestream.Open(filepath, 3, False)
+            speaker.AudioOutputStream = filestream
+            speaker.Speak(text)
+            filestream.Close()
+            return os.path.exists(filepath) and os.path.getsize(filepath) > 0
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+    except Exception as e:
+        logging.warning(f"[TTS] SAPI file synthesis failed: {e}")
+        return False
+
+
+def _speak_sapi(text: str):
+    """Speaks directly through Windows SAPI (offline fallback)."""
+    global is_speaking
+    is_speaking = True
+    try:
+        import pythoncom
+        import win32com.client
+        pythoncom.CoInitialize()
+        try:
+            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            speaker.Speak(text)
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+    except Exception as e:
+        logging.warning(f"[TTS] SAPI direct speech failed: {e}")
+    finally:
+        is_speaking = False
+        _mark_speech_end()
+
+
+def clean_text_for_speech(text: str) -> str:
+    """Prepares raw LLM markdown text for natural, conversational human speech.
+
+    Strips code blocks, markdown tables, raw URLs, excessive symbols,
+    and expands numbers/units into naturally spoken words.
+    """
+    if not text:
+        return ""
+
+    # 1. Strip triple-backtick code blocks
+    text = re.sub(r'```[\s\S]*?```', ' [code omitted] ', text)
+
+    # 2. Strip inline code backticks: `file.py` -> file.py
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+
+    # 3. Replace long URLs with clean domain or "the link"
+    def _url_sub(match):
+        u = match.group(0)
+        try:
+            from urllib.parse import urlparse
+            netloc = urlparse(u).netloc
+            return f"link to {netloc}" if netloc else "the link"
+        except Exception:
+            return "the link"
+    text = re.sub(r'https?://\S+', _url_sub, text)
+
+    # 4. Remove markdown images and links: [Title](url) -> Title
+    text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+    text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)
+
+    # 5. Remove headers, bold, italics, strikethrough, blockquotes
+    text = re.sub(r'#+\s*', '', text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
+    text = re.sub(r'__(.*?)__', r'\1', text)
+    text = re.sub(r'_(.*?)_', r'\1', text)
+    text = re.sub(r'~~(.*?)~~', r'\1', text)
+    text = re.sub(r'^\s*>\s*', '', text, flags=re.MULTILINE)
+
+    # 6. Remove bullet points and list numbering
+    text = re.sub(r'^\s*[\*\-\+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+
+    # 7. Convert common technical symbols to natural conversational words
+    text = re.sub(r'\bapprox\.?\b', 'approximately', text, flags=re.IGNORECASE)
+    text = re.sub(r'\be\.g\.?\b', 'for example', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bi\.e\.?\b', 'that is', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bw/\b', 'with', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bw/o\b', 'without', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bvs\.?\b', 'versus', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d+)\s*ms\b', r'\1 milliseconds', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d+)\s*kHz\b', r'\1 kilohertz', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d+)\s*MHz\b', r'\1 megahertz', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d+)\s*GB\b', r'\1 gigabytes', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d+)\s*MB\b', r'\1 megabytes', text, flags=re.IGNORECASE)
+    text = text.replace('$', ' dollars ').replace('&', ' and ').replace('%', ' percent ')
+    text = re.sub(r'->|=>', ' to ', text)
+
+    # 8. Collapse whitespace and newlines into smooth sentence pauses
+    text = re.sub(r'\n+', '. ', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\.\s*\.', '.', text)
+    return text.strip()
+
+
 def speak(text: str):
     """Speaks the given text using the best available TTS engine."""
     global _last_spoken_text
     print(f"\nAURA: {text.strip()}")
 
-    # Clean up markdown formatting so the voice doesn't pronounce "asterisk"
-    clean_text = re.sub(r'\*\*(.*?)\*\*', r'\1', text) # Remove bold
-    clean_text = re.sub(r'\*(.*?)\*', r'\1', clean_text) # Remove italics
-    clean_text = clean_text.replace('*', '') # Remove bullet points or stray asterisks
-    clean_text = re.sub(r'#+\s*', '', clean_text) # Remove headers
+    clean_text = clean_text_for_speech(text)
     _last_spoken_text = clean_text
 
+    tts_backend = os.environ.get("AURA_TTS_BACKEND", "edge").lower()
+
+    # 1. If user prefers Kokoro offline neural voice and model is present
+    if tts_backend == "kokoro" and os.path.exists(_kokoro_model_path):
+        kokoro_voice = os.environ.get("AURA_TTS_VOICE", "af_heart")
+        if _speak_kokoro(clean_text, voice_name=kokoro_voice):
+            return
+
+    # 2. Try Edge TTS (Neural high-fidelity cloud voice)
     if _use_edge_tts:
         _speak_edge_tts(clean_text)
+    elif _speak_kokoro(clean_text):
+        return
     elif _pyttsx3_engine:
         _speak_pyttsx3(clean_text)
+    else:
+        _speak_sapi(clean_text)
 
 
 def generate_tts_file(text: str) -> str:
-    """Generates a TTS audio file and returns its path without playing it."""
+    """Generates a TTS audio file and returns its path without playing it.
+    Attempts neural Edge TTS first, with automatic fallback to native Windows SAPI.
+    """
     global _last_spoken_text
-    clean_text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-    clean_text = re.sub(r'\*(.*?)\*', r'\1', clean_text)
-    clean_text = clean_text.replace('*', '')
-    clean_text = re.sub(r'#+\s*', '', clean_text)
+    clean_text = clean_text_for_speech(text)
     _last_spoken_text = clean_text
 
     _cleanup_stale_tts_files()
-    filepath = os.path.join(_TEMP_DIR, f"aura_tts_{uuid.uuid4().hex}.mp3")
-    
+
+    tts_backend = os.environ.get("AURA_TTS_BACKEND", "edge").lower()
+    if tts_backend == "kokoro" and os.path.exists(_kokoro_model_path):
+        kokoro = _init_kokoro()
+        if kokoro:
+            try:
+                import soundfile as sf
+                filepath = os.path.join(_TEMP_DIR, f"aura_tts_{uuid.uuid4().hex}.wav")
+                kokoro_voice = os.environ.get("AURA_TTS_VOICE", "af_heart")
+                samples, sample_rate = kokoro.create(clean_text, voice=kokoro_voice, speed=1.0, lang="en-us")
+                sf.write(filepath, samples, sample_rate)
+                if os.path.exists(filepath):
+                    return filepath
+            except Exception as e:
+                logging.warning(f"[TTS] Kokoro file generation failed: {e}")
+
+    # 1. Try Edge TTS (Neural high-quality voice)
     if _use_edge_tts:
-        import edge_tts
-        import concurrent.futures
-        
-        async def _synth():
-            communicate = edge_tts.Communicate(clean_text, EDGE_TTS_VOICE)
-            await communicate.save(filepath)
-        
-        # Always run in a fresh thread to avoid event loop conflicts
-        def _worker():
-            asyncio.run(_synth())
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            pool.submit(_worker).result(timeout=30)
+        filepath = os.path.join(_TEMP_DIR, f"aura_tts_{uuid.uuid4().hex}.mp3")
+        try:
+            import edge_tts
+            import concurrent.futures
             
-        return filepath
-    else:
-        # pyttsx3 fallback (save to file)
-        if _pyttsx3_engine:
-            _pyttsx3_engine.save_to_file(clean_text, filepath)
+            async def _synth():
+                communicate = edge_tts.Communicate(clean_text, EDGE_TTS_VOICE)
+                await communicate.save(filepath)
+            
+            # Always run in a fresh thread to avoid event loop conflicts
+            def _worker():
+                asyncio.run(_synth())
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                pool.submit(_worker).result(timeout=15)
+                
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                return filepath
+        except Exception as e:
+            logging.warning(f"[TTS] Edge TTS synthesis failed ({e}). Falling back to native Windows offline voice.")
+
+    # 2. Native Windows SAPI fallback (offline, immediate, zero-network)
+    sapi_path = os.path.join(_TEMP_DIR, f"aura_tts_{uuid.uuid4().hex}.wav")
+    if _synth_sapi_file(clean_text, sapi_path):
+        return sapi_path
+
+    # 3. pyttsx3 fallback
+    if _pyttsx3_engine:
+        try:
+            fallback_path = os.path.join(_TEMP_DIR, f"aura_tts_{uuid.uuid4().hex}.wav")
+            _pyttsx3_engine.save_to_file(clean_text, fallback_path)
             _pyttsx3_engine.runAndWait()
-            return filepath
+            if os.path.exists(fallback_path):
+                return fallback_path
+        except Exception:
+            pass
+
     return ""
 
 
 def _speak_edge_tts(text: str):
-    """High-quality neural voice via Edge TTS."""
-    import asyncio
-    import edge_tts
-
-    async def _synth():
-        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE, rate=EDGE_TTS_RATE)
-        await communicate.save(_TTS_PATH)
-
-    # Handle asyncio event loop safely
+    """High-quality neural voice via Edge TTS with automatic SAPI fallback."""
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
+        import asyncio
+        import edge_tts
 
-    if loop and loop.is_running():
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            pool.submit(_run_in_new_loop, _synth()).result()
-    else:
-        asyncio.run(_synth())
+        async def _synth():
+            communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE, rate=EDGE_TTS_RATE)
+            await communicate.save(_TTS_PATH)
 
-    _play_mp3(_TTS_PATH)
+        # Handle asyncio event loop safely
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                pool.submit(_run_in_new_loop, _synth()).result(timeout=15)
+        else:
+            asyncio.run(_synth())
+
+        if os.path.exists(_TTS_PATH) and os.path.getsize(_TTS_PATH) > 0:
+            _play_mp3(_TTS_PATH)
+            return
+    except Exception as e:
+        logging.warning(f"[TTS] Edge TTS playback failed ({e}). Falling back to native voice.")
+
+    # Direct fallback to native Windows SAPI
+    _speak_sapi(text)
 
 
 def _run_in_new_loop(coro):
@@ -252,6 +590,8 @@ def _speak_pyttsx3(text: str):
 
 def listen(max_duration=15, fs=16000) -> str:
     """Listens to the microphone using sounddevice with dynamic silence detection."""
+    global _is_listening_active
+    _is_listening_active = True
     try:
         import numpy as np
 
@@ -267,29 +607,67 @@ def listen(max_duration=15, fs=16000) -> str:
         recorded_chunks = []
         silence_chunks = 0
         speech_started = False
+
+        # One-shot command streaming: seed pre-roll audio if triggered right after wake-word
+        global _last_wakeword_preroll, _last_wakeword_preroll_ts
+        one_shot_enabled = os.environ.get("AURA_WAKEWORD_ONE_SHOT", "true").lower() in ("true", "1", "yes")
+        if one_shot_enabled and _last_wakeword_preroll and (time.time() - _last_wakeword_preroll_ts) < 3.5:
+            for pr_chunk in _last_wakeword_preroll:
+                pr_2d = np.asarray(pr_chunk, dtype=np.int16).reshape(-1, 1)
+                recorded_chunks.append(pr_2d)
+            preroll_max_rms = max((float(np.sqrt(np.mean(c.astype(np.float32)**2))) for c in recorded_chunks), default=0.0)
+            if preroll_max_rms > 120.0:
+                speech_started = True
+                print(f"[VOICE] One-shot audio seeded ({len(_last_wakeword_preroll)} chunks, max rms: {preroll_max_rms:.1f})")
+                logging.info(f"[VOICE] One-shot audio seeded ({len(_last_wakeword_preroll)} chunks, max rms: {preroll_max_rms:.1f})")
+            _last_wakeword_preroll = None
         
-        stream = sd.InputStream(samplerate=fs, channels=1, dtype='int16')
+        device = _resolve_input_device(os.environ.get("AURA_WAKEWORD_DEVICE"))
+        stream = sd.InputStream(samplerate=fs, channels=1, dtype='int16', device=device)
         with stream:
             # 1. Quick calibration chunk (0.5 seconds)
             calib_chunk, _ = stream.read(int(fs * 0.5))
             recorded_chunks.append(calib_chunk)
-            ambient_rms = np.sqrt(np.mean(calib_chunk.astype(np.float32)**2))
             
-            # Base threshold on ambient noise, but keep a minimum of 300
-            threshold = max(ambient_rms * 1.5 + 150, 300)
+            # Start with the calibration chunk's RMS
+            initial_rms = np.sqrt(np.mean(calib_chunk.astype(np.float32)**2))
+            
+            # noise_floor tracks the quietest background noise we've seen.
+            # We initialize it to the calibration chunk, but if they are already speaking,
+            # this will be high initially and drop later when they pause.
+            noise_floor = initial_rms
+            
+            # Base threshold dynamically tracks the noise floor (sensitive to normal room speech)
+            threshold = max(noise_floor * 2.0 + 25, 60)
+            
+            # If it's already loud, assume speech started immediately
+            if initial_rms > 300:
+                speech_started = True
+                print(f"[VOICE] Speech detected immediately (rms: {initial_rms:.1f})")
+                logging.info(f"[VOICE] Speech detected immediately (rms: {initial_rms:.1f})")
             
             # 2. Main recording loop
             max_iterations = int(max_duration / chunk_duration)
-            for _ in range(max_iterations):
+            silence_timeout_chunks = int(5.0 / chunk_duration)  # 5 seconds of silence before timeout
+            for iter_idx in range(max_iterations):
                 chunk, overflowed = stream.read(chunk_samples)
                 recorded_chunks.append(chunk)
                 
                 rms = np.sqrt(np.mean(chunk.astype(np.float32)**2))
                 
+                # Adapt noise floor downwards if we find a quieter moment
+                if rms < noise_floor:
+                    noise_floor = rms
+                    threshold = max(noise_floor * 2.0 + 25, 60)
+                
                 if not speech_started:
                     # Detect if speech has started
                     if rms > threshold:
                         speech_started = True
+                        logging.info(f"[VOICE] Speech started (rms: {rms:.1f} > thr: {threshold:.1f})")
+                    elif iter_idx >= silence_timeout_chunks:
+                        # User hasn't spoken for 5 seconds, exit early
+                        break
                 else:
                     # If speech started, check for silence
                     if rms < threshold:
@@ -301,8 +679,16 @@ def listen(max_duration=15, fs=16000) -> str:
                     if silence_chunks >= 4:
                         break
 
-        # Concatenate all recorded chunks
+        # Check if any chunk had audible sound above ambient noise floor
+        chunk_max_rms = max((np.sqrt(np.mean(c.astype(np.float32)**2)) for c in recorded_chunks), default=0.0)
+        if not speech_started and chunk_max_rms < max(noise_floor * 1.5, 30):
+            print(f"[VOICE] No speech detected (max rms: {chunk_max_rms:.1f}, noise floor: {noise_floor:.1f}).")
+            logging.info(f"[VOICE] No speech detected (max rms: {chunk_max_rms:.1f}, noise floor: {noise_floor:.1f})")
+            return ""
+
+        # Concatenate all recorded chunks and normalize volume
         recording = np.concatenate(recorded_chunks, axis=0)
+        recording = normalize_audio(recording)
 
         # Unique temp file: two overlapping listen() calls (e.g. HUD open in
         # two tabs) must not overwrite each other's capture.
@@ -336,11 +722,15 @@ def listen(max_duration=15, fs=16000) -> str:
     except Exception as e:
         print(f"\n[Microphone Error]: {e}")
         return "SWITCH_TO_TEXT_MODE"
+    finally:
+        _is_listening_active = False
 
 def _get_wakeword_model_path():
     base_dir = os.path.dirname(os.path.abspath(__file__))
+    env_model = os.environ.get("AURA_WAKEWORD_MODEL")
     candidates = [
-        os.environ.get("AURA_WAKEWORD_MODEL"),
+        env_model,
+        os.path.join(base_dir, env_model) if env_model else None,
         os.path.join(base_dir, "models", "hey_aura.onnx"),
         os.path.join(base_dir, "models", "hey_aura.tflite"),
         os.path.join(base_dir, "hey_aura.onnx"),
@@ -348,7 +738,7 @@ def _get_wakeword_model_path():
     ]
     for p in candidates:
         if p and os.path.exists(p):
-            return p
+            return os.path.abspath(p)
     return None
 
 
@@ -392,14 +782,20 @@ _fp_day = ""                        # date string the FP counter is valid for
 
 
 def get_wakeword_status():
+    global _last_inference_latency_ms
     return {
         "enabled": wakeword_enabled,
         "listening": wakeword_listening,
-        "threshold": _env_float("AURA_WAKEWORD_THRESHOLD", 0.6),
+        "threshold": _env_float("AURA_WAKEWORD_THRESHOLD", 0.88),
+        "persistence": int(os.environ.get("AURA_WAKEWORD_PERSISTENCE", "6")),
+        "vad_threshold": _env_float("AURA_WAKEWORD_VAD_THRESHOLD", 15.0),
+        "one_shot_enabled": os.environ.get("AURA_WAKEWORD_ONE_SHOT", "true").lower() in ("true", "1", "yes"),
+        "speaker_verification_enabled": os.environ.get("AURA_SPEAKER_VERIFICATION", "false").lower() in ("true", "1", "yes"),
         "last_detection_ts": wakeword_last_detection_ts,
         "model_loaded": wakeword_model_loaded,
         "error": wakeword_model_error,
         "false_positives_today": wakeword_false_positives,
+        "last_inference_ms": round(_last_inference_latency_ms, 2),
     }
 
 
@@ -413,9 +809,10 @@ def set_wakeword_enabled(enabled: bool):
 def start_wakeword_listener(callback):
     import threading
 
-    threshold = _env_float("AURA_WAKEWORD_THRESHOLD", 0.6)
-    speaking_threshold = _env_float("AURA_WAKEWORD_SPEAKING_THRESHOLD", 0.8)
-    cooldown = _env_float("AURA_WAKEWORD_COOLDOWN", 2.0)
+    threshold = _env_float("AURA_WAKEWORD_THRESHOLD", 0.88)
+    speaking_threshold = _env_float("AURA_WAKEWORD_SPEAKING_THRESHOLD", 0.93)
+    cooldown = _env_float("AURA_WAKEWORD_COOLDOWN", 3.5)
+    persistence = int(os.environ.get("AURA_WAKEWORD_PERSISTENCE", "6"))
     device = _resolve_input_device(os.environ.get("AURA_WAKEWORD_DEVICE"))
 
     def listener_thread():
@@ -465,7 +862,8 @@ def start_wakeword_listener(callback):
             if device is not None:
                 dev_desc = sd.query_devices(device)["name"]
             print(f'[WAKE WORD] Loaded "{model_path}". Listening for "Hey Aura" on mic: {dev_desc} '
-                  f'(threshold={threshold}, speaking_threshold={speaking_threshold}, cooldown={cooldown}s)')
+                  f'(threshold={threshold}, speaking_threshold={speaking_threshold}, '
+                  f'persistence={persistence}, cooldown={cooldown}s)')
 
             last_detect = 0.0
             consec_high = 0
@@ -493,36 +891,74 @@ def start_wakeword_listener(callback):
             def audio_callback(indata, frames, time_info, status):
                 nonlocal last_detect, consec_high
                 global wakeword_last_detection_ts, wakeword_false_positives, _fp_day
-                if not wakeword_enabled:
+                global _last_inference_latency_ms, _last_wakeword_preroll, _last_wakeword_preroll_ts
+                if not wakeword_enabled or _is_listening_active:
                     return
                 if status:
                     print(f"[WAKE WORD] Audio status: {status}")
 
                 # openwakeword expects 1D int16 array
                 audio_data = (indata[:, 0]).astype(np.int16)
+
+                # Maintain circular pre-roll buffer for one-shot command continuity
+                _preroll_audio_ring.append(audio_data.copy())
+
+                # Energy-adaptive VAD pre-filter: skip ONNX inference during ambient room silence
+                vad_threshold = _env_float("AURA_WAKEWORD_VAD_THRESHOLD", 15.0)
+                audio_rms = float(np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)))
+                if audio_rms < vad_threshold:
+                    consec_high = 0
+                    return
+
+                t_start = time.perf_counter()
                 prediction = owwModel.predict(audio_data)
+                _last_inference_latency_ms = (time.perf_counter() - t_start) * 1000.0
 
                 for mdl, score in prediction.items():
                     # Higher threshold while AURA is speaking to prevent self-triggering,
                     # but a loud/close "Hey Aura" can still interrupt (barge-in).
                     thr = speaking_threshold if is_speaking else threshold
                     now = time.time()
-                    # Persistence: the full phrase sustains high scores across
-                    # several consecutive chunks; isolated spikes do not.
-                    if score > thr:
+                    
+                    # Strict consecutive persistence: full phrase must sustain high scores
+                    # without dropping below threshold. Any drop resets immediately.
+                    if score >= thr:
                         consec_high += 1
-                    elif score < thr * 0.8:
+                    else:
                         consec_high = 0
-                    if score > thr and consec_high >= 4 and (now - last_detect) >= cooldown:
+
+                    # Detection requires sustained consecutive frames meeting the threshold
+                    is_detected = (score >= thr and consec_high >= persistence)
+
+                    if is_detected and (now - last_detect) >= cooldown:
                         # Refractory period: ignore detections in the first second
                         # after AURA finishes speaking - that's just her own echo.
                         if not is_speaking and (now - _last_speak_end) < 1.0:
                             owwModel.reset()
                             return
+
+                        # Speaker verification gate (if enabled)
+                        spk_ver_enabled = os.environ.get("AURA_SPEAKER_VERIFICATION", "false").lower() in ("true", "1", "yes")
+                        if spk_ver_enabled:
+                            recent_audio = np.concatenate(list(_preroll_audio_ring)[-5:], axis=0) if len(_preroll_audio_ring) >= 5 else audio_data
+                            feats = compute_acoustic_features(recent_audio)
+                            ref_profile = _load_speaker_profile()
+                            if not verify_speaker_voiceprint(feats, ref_profile):
+                                logging.info(f"[WAKE WORD] Wake candidate rejected by speaker voiceprint gate (f0={feats['f0_hz']}Hz)")
+                                consec_high = 0
+                                return
+
                         last_detect = now
                         consec_high = 0
                         wakeword_last_detection_ts = now
-                        print(f'[WAKE WORD] Detected {mdl} with score {score:.3f} (threshold {thr})')
+
+                        # Store pre-roll snapshot for one-shot command streaming
+                        _last_wakeword_preroll = list(_preroll_audio_ring)
+                        _last_wakeword_preroll_ts = now
+
+                        msg = f'[WAKE WORD] Detected {mdl} with score {score:.3f} (threshold {thr})'
+                        print(msg)
+                        logging.info(msg)
                         _log_detection(score, thr, is_speaking)
                         if is_speaking:
                             print('[WAKE WORD] Barge-in detected! Stopping TTS...')

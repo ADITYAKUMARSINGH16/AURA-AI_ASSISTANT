@@ -5,7 +5,7 @@ import platform
 try:
     import wmi
     WMI_AVAILABLE = True
-except ImportError:
+except Exception:
     wmi = None
     WMI_AVAILABLE = False
 
