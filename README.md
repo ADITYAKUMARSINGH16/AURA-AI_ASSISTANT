@@ -1,6 +1,8 @@
 # AURA 2.0 — Autonomous Utility & Response Agent
 
-![AURA Banner](static/logo_small.png)
+<p align="center">
+  <img src="static/logo_small.png" alt="AURA Banner" />
+</p>
 
 **AURA 2.0** is a locally-first, multi-modal autonomous AI assistant for Windows featuring a **Cinematic Landing Page**, a full-screen **Tactical HUD Command Console**, real-time **Server-Sent Events (SSE)** streaming, **Ambient Context Awareness**, **Local Desktop RAG**, and a **Model Context Protocol (MCP)** client.
 
