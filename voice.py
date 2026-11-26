@@ -22,14 +22,31 @@ load_dotenv()
 #
 # To upgrade to neural voice, run:  pip install edge-tts pygame
 #
-# Voice options for edge-tts:
+# Voice options for edge-tts (ultra-realistic human neural models):
+#   en-US-AvaNeural       - Female, ultra-realistic conversational (Default)
+#   en-US-AndrewNeural    - Male, warm natural conversational
+#   en-US-EmmaNeural      - Female, expressive natural
+#   en-US-JennyNeural     - Female, friendly American
+#   en-GB-SoniaNeural     - Female, sophisticated British (Jarvis/Friday)
+#   en-GB-RyanNeural      - Male, intellectual British
 #   en-US-GuyNeural       - Male, natural American
-#   en-US-AriaNeural      - Female, natural American
-#   en-GB-RyanNeural      - Male, British
-#   en-IN-PrabhatNeural   - Male, Indian English
+#   en-US-AriaNeural      - Female, classic tactical assistant
 
-EDGE_TTS_VOICE = os.environ.get("AURA_TTS_VOICE", "en-US-AriaNeural")
+EDGE_TTS_VOICE = os.environ.get("AURA_TTS_VOICE", "en-US-AvaNeural")
 EDGE_TTS_RATE = os.environ.get("AURA_TTS_RATE", "+0%")
+
+def set_tts_voice(voice_name: Optional[str] = None, rate: Optional[str] = None):
+    global EDGE_TTS_VOICE, EDGE_TTS_RATE
+    if voice_name:
+        EDGE_TTS_VOICE = voice_name
+    if rate:
+        EDGE_TTS_RATE = rate
+
+def get_tts_voice() -> str:
+    return EDGE_TTS_VOICE
+
+def get_tts_rate() -> str:
+    return EDGE_TTS_RATE
 
 _TEMP_DIR = tempfile.gettempdir()
 _TTS_PATH = os.path.join(_TEMP_DIR, "aura_tts_output.mp3")
@@ -253,16 +270,45 @@ _kokoro_instance = None
 _kokoro_model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "kokoro")
 _kokoro_model_path = os.path.join(_kokoro_model_dir, "kokoro-v0_19.onnx")
 _kokoro_voices_path = os.path.join(_kokoro_model_dir, "voices.json")
+_kokoro_voices_npz_path = os.path.join(_kokoro_model_dir, "voices.npz")
+_kokoro_voices_bin_path = os.path.join(_kokoro_model_dir, "voices-v1.0.bin")
+
+
+def _ensure_kokoro_voices_file() -> Optional[str]:
+    """Return a np.load-compatible Kokoro voices archive (.bin or .npz), converting voices.json if needed."""
+    if os.path.exists(_kokoro_voices_bin_path) and os.path.getsize(_kokoro_voices_bin_path) > 0:
+        return _kokoro_voices_bin_path
+    if os.path.exists(_kokoro_voices_npz_path) and os.path.getsize(_kokoro_voices_npz_path) > 0:
+        return _kokoro_voices_npz_path
+    if not os.path.exists(_kokoro_voices_path):
+        return None
+    try:
+        import json
+        with open(_kokoro_voices_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, dict) or not raw:
+            return None
+        arrays = {k: np.asarray(v, dtype=np.float32) for k, v in raw.items()}
+        tmp_path = _kokoro_voices_npz_path + ".tmp.npz"
+        np.savez(tmp_path, **arrays)
+        os.replace(tmp_path, _kokoro_voices_npz_path)
+        return _kokoro_voices_npz_path
+    except Exception as e:
+        logging.warning(f"[TTS] Failed to convert Kokoro voices.json to voices.npz: {e}")
+        return None
 
 
 def _init_kokoro():
     global _kokoro_instance
     if _kokoro_instance is not None:
         return _kokoro_instance
-    if os.path.exists(_kokoro_model_path) and os.path.exists(_kokoro_voices_path):
+    if os.path.exists(_kokoro_model_path):
+        voices_file = _ensure_kokoro_voices_file()
+        if not voices_file:
+            return None
         try:
             import kokoro_onnx
-            _kokoro_instance = kokoro_onnx.Kokoro(_kokoro_model_path, _kokoro_voices_path)
+            _kokoro_instance = kokoro_onnx.Kokoro(_kokoro_model_path, voices_file)
             print("[TTS] Kokoro-ONNX offline neural engine loaded.")
             return _kokoro_instance
         except Exception as e:
@@ -270,14 +316,51 @@ def _init_kokoro():
     return None
 
 
-def _speak_kokoro(text: str, voice_name: str = "af_heart") -> bool:
+def _tts_rate_to_speed(rate_str: Optional[str]) -> float:
+    """Convert Edge-style rate string (e.g. '+15%', '-10%') into Kokoro speed multiplier."""
+    if not rate_str:
+        return 1.0
+    try:
+        pct = float(str(rate_str).strip().replace("%", "").replace("+", ""))
+        return max(0.5, min(2.0, round(1.0 + (pct / 100.0), 2)))
+    except ValueError:
+        return 1.0
+
+
+def _resolve_edge_voice(requested_voice: Optional[str]) -> str:
+    """Ensure Edge-TTS receives a valid Edge Neural voice ID (containing locale hyphens), never a Kokoro ID."""
+    cand = (requested_voice or "").strip()
+    if cand and "-" in cand:
+        return cand
+    env_or_default = (EDGE_TTS_VOICE or "").strip()
+    if env_or_default and "-" in env_or_default:
+        return env_or_default
+    return "en-US-JennyNeural"
+
+
+def _resolve_kokoro_voice(kokoro, requested_voice: str) -> str:
+    """Resolve a Kokoro voice ID, falling back to 'af' (or first voice) if an Edge-TTS name is set."""
+    voices = getattr(kokoro, "voices", None)
+    keys = list(voices.keys()) if hasattr(voices, "keys") else (list(voices.files) if hasattr(voices, "files") else [])
+    if requested_voice and requested_voice in keys:
+        return requested_voice
+    if "af" in keys:
+        return "af"
+    if keys:
+        return keys[0]
+    return "af"
+
+
+def _speak_kokoro(text: str, voice_name: str = "af", rate: Optional[str] = None) -> bool:
     """Speaks using Kokoro-82M offline neural voice."""
     kokoro = _init_kokoro()
     if not kokoro:
         return False
     try:
         import soundfile as sf
-        samples, sample_rate = kokoro.create(text, voice=voice_name, speed=1.0, lang="en-us")
+        resolved_voice = _resolve_kokoro_voice(kokoro, voice_name)
+        speed = _tts_rate_to_speed(rate or EDGE_TTS_RATE)
+        samples, sample_rate = kokoro.create(text, voice=resolved_voice, speed=speed, lang="en-us")
         wav_path = _TTS_PATH.replace(".mp3", ".wav")
         sf.write(wav_path, samples, sample_rate)
         _play_mp3(wav_path)
@@ -360,6 +443,9 @@ def clean_text_for_speech(text: str) -> str:
     if not text:
         return ""
 
+    # 0. Strip reasoning / cognitive thinking traces
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)
+
     # 1. Strip triple-backtick code blocks
     text = re.sub(r'```[\s\S]*?```', ' [code omitted] ', text)
 
@@ -428,7 +514,7 @@ def speak(text: str):
 
     # 1. If user prefers Kokoro offline neural voice and model is present
     if tts_backend == "kokoro" and os.path.exists(_kokoro_model_path):
-        kokoro_voice = os.environ.get("AURA_TTS_VOICE", "af_heart")
+        kokoro_voice = os.environ.get("AURA_TTS_VOICE", "af")
         if _speak_kokoro(clean_text, voice_name=kokoro_voice):
             return
 
@@ -443,7 +529,7 @@ def speak(text: str):
         _speak_sapi(clean_text)
 
 
-def generate_tts_file(text: str) -> str:
+def generate_tts_file(text: str, voice: Optional[str] = None, rate: Optional[str] = None, backend: Optional[str] = None) -> str:
     """Generates a TTS audio file and returns its path without playing it.
     Attempts neural Edge TTS first, with automatic fallback to native Windows SAPI.
     """
@@ -453,15 +539,19 @@ def generate_tts_file(text: str) -> str:
 
     _cleanup_stale_tts_files()
 
-    tts_backend = os.environ.get("AURA_TTS_BACKEND", "edge").lower()
+    active_voice = _resolve_edge_voice(voice or EDGE_TTS_VOICE)
+    active_rate = rate or EDGE_TTS_RATE
+
+    tts_backend = (backend or os.environ.get("AURA_TTS_BACKEND", "edge")).lower()
     if tts_backend == "kokoro" and os.path.exists(_kokoro_model_path):
         kokoro = _init_kokoro()
         if kokoro:
             try:
                 import soundfile as sf
                 filepath = os.path.join(_TEMP_DIR, f"aura_tts_{uuid.uuid4().hex}.wav")
-                kokoro_voice = os.environ.get("AURA_TTS_VOICE", "af_heart")
-                samples, sample_rate = kokoro.create(clean_text, voice=kokoro_voice, speed=1.0, lang="en-us")
+                kokoro_voice = _resolve_kokoro_voice(kokoro, voice or os.environ.get("AURA_TTS_VOICE", "af"))
+                speed = _tts_rate_to_speed(active_rate)
+                samples, sample_rate = kokoro.create(clean_text, voice=kokoro_voice, speed=speed, lang="en-us")
                 sf.write(filepath, samples, sample_rate)
                 if os.path.exists(filepath):
                     return filepath
@@ -476,7 +566,8 @@ def generate_tts_file(text: str) -> str:
             import concurrent.futures
             
             async def _synth():
-                communicate = edge_tts.Communicate(clean_text, EDGE_TTS_VOICE)
+                # Uses rate=EDGE_TTS_RATE by default unless overridden
+                communicate = edge_tts.Communicate(clean_text, active_voice, rate=active_rate)
                 await communicate.save(filepath)
             
             # Always run in a fresh thread to avoid event loop conflicts
@@ -509,14 +600,17 @@ def generate_tts_file(text: str) -> str:
     return ""
 
 
-def _speak_edge_tts(text: str):
+def _speak_edge_tts(text: str, voice: Optional[str] = None, rate: Optional[str] = None):
     """High-quality neural voice via Edge TTS with automatic SAPI fallback."""
     try:
         import asyncio
         import edge_tts
 
+        active_voice = _resolve_edge_voice(voice or EDGE_TTS_VOICE)
+        active_rate = rate or EDGE_TTS_RATE
+
         async def _synth():
-            communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE, rate=EDGE_TTS_RATE)
+            communicate = edge_tts.Communicate(text, active_voice, rate=active_rate)
             await communicate.save(_TTS_PATH)
 
         # Handle asyncio event loop safely
@@ -586,6 +680,125 @@ def _speak_pyttsx3(text: str):
     finally:
         is_speaking = False
         _mark_speech_end()
+
+
+# ──────────── Speech-to-Text (STT) Engine ────────────
+_whisper_instance = None
+_whisper_loaded_config = None
+
+
+def _init_whisper():
+    """Initializes and caches the faster-whisper model on demand."""
+    global _whisper_instance, _whisper_loaded_config
+    model_name = os.environ.get("AURA_STT_MODEL", "tiny.en")
+    device_cfg = os.environ.get("AURA_STT_DEVICE", "auto").lower()
+    compute_cfg = os.environ.get("AURA_STT_COMPUTE_TYPE", "auto").lower()
+
+    cfg_key = f"{model_name}:{device_cfg}:{compute_cfg}"
+    if _whisper_instance is not None and _whisper_loaded_config == cfg_key:
+        return _whisper_instance
+
+    try:
+        import faster_whisper
+        import ctranslate2
+
+        device = device_cfg
+        if device == "auto":
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+
+        compute_type = compute_cfg
+        if compute_type == "auto":
+            compute_type = "float16" if device == "cuda" else "int8"
+
+        print(f"[STT] Loading faster-whisper ({model_name} on {device}:{compute_type})...")
+        try:
+            _whisper_instance = faster_whisper.WhisperModel(model_name, device=device, compute_type=compute_type)
+            # Verify CUDA runtime dependencies (e.g. cublas64_12.dll) with a lightweight probe
+            if device == "cuda":
+                dummy_probe = np.zeros(1600, dtype=np.float32)
+                _ = list(_whisper_instance.transcribe(dummy_probe, beam_size=1)[0])
+        except Exception as cuda_err:
+            if device == "cuda":
+                logging.info(f"[STT] CUDA runtime unavailable ({cuda_err}). Seamlessly falling back to CPU int8.")
+                device = "cpu"
+                compute_type = "int8"
+                _whisper_instance = faster_whisper.WhisperModel(model_name, device=device, compute_type=compute_type)
+            else:
+                raise cuda_err
+
+        _whisper_loaded_config = cfg_key
+        print(f"[STT] faster-whisper ready ({model_name} on {device}:{compute_type}). 100% offline speech recognition active.")
+        return _whisper_instance
+    except Exception as e:
+        logging.warning(f"[STT] Failed to initialize faster-whisper ({e}). Fallback to cloud STT.")
+        return None
+
+
+def transcribe_audio(audio_data: np.ndarray, sample_rate: int = 16000) -> str:
+    """Transcribes an audio waveform into text.
+    Prefers 100% offline faster-whisper, with automatic fallback to cloud SpeechRecognition.
+    """
+    if audio_data is None or len(audio_data) == 0:
+        return ""
+
+    stt_backend = os.environ.get("AURA_STT_BACKEND", "local").lower()
+
+    # 1. Local Offline Neural Speech Recognition (faster-whisper)
+    if stt_backend != "cloud":
+        whisper = _init_whisper()
+        if whisper:
+            try:
+                # Ensure float32 normalized [-1.0, 1.0] as required by whisper
+                if audio_data.dtype == np.int16:
+                    audio_float = audio_data.astype(np.float32) / 32768.0
+                else:
+                    audio_float = audio_data.astype(np.float32)
+
+                if audio_float.ndim > 1:
+                    audio_float = audio_float.flatten()
+
+                segments, info = whisper.transcribe(
+                    audio_float,
+                    beam_size=3,
+                    language="en",
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=400),
+                )
+                text = " ".join([seg.text for seg in segments]).strip()
+                if text:
+                    return text
+                return ""
+            except Exception as e:
+                logging.warning(f"[STT] faster-whisper transcription error ({e}). Trying cloud fallback.")
+
+    # 2. Cloud Fallback (Google SpeechRecognition)
+    temp_path = os.path.join(_TEMP_DIR, f"aura_stt_{uuid.uuid4().hex}.wav")
+    try:
+        if audio_data.dtype != np.int16:
+            audio_int = np.clip(audio_data * 32768.0, -32768, 32767).astype(np.int16)
+        else:
+            audio_int = audio_data
+        wav.write(temp_path, sample_rate, audio_int)
+
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(temp_path) as source:
+            audio = recognizer.record(source)
+            text = recognizer.recognize_google(audio)
+            return text
+    except sr.UnknownValueError:
+        return ""
+    except sr.RequestError as e:
+        logging.warning(f"[STT] Google SpeechRecognition request error: {e}")
+        return ""
+    except Exception as e:
+        logging.warning(f"[STT] SpeechRecognition audio read error: {e}")
+        return ""
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
 
 
 def listen(max_duration=15, fs=16000) -> str:
@@ -690,35 +903,18 @@ def listen(max_duration=15, fs=16000) -> str:
         recording = np.concatenate(recorded_chunks, axis=0)
         recording = normalize_audio(recording)
 
-        # Unique temp file: two overlapping listen() calls (e.g. HUD open in
-        # two tabs) must not overwrite each other's capture.
-        temp_path = os.path.join(_TEMP_DIR, f"aura_temp_audio_{uuid.uuid4().hex}.wav")
-        try:
-            wav.write(temp_path, fs, recording)
+        text = transcribe_audio(recording, fs)
+        if text:
+            print(f"You: {text}")
+            # Echo guard: discard transcriptions of AURA's own voice
+            if _is_echo_of_self(text):
+                print("[VOICE] Discarded input: it was an echo of AURA's own speech.")
+                return ""
+            return text
+        else:
+            print("[Could not understand audio. Try speaking clearly.]")
+            return ""
 
-            recognizer = sr.Recognizer()
-            with sr.AudioFile(temp_path) as source:
-                audio = recognizer.record(source)
-                text = recognizer.recognize_google(audio)
-                print(f"You: {text}")
-
-                # Echo guard: discard transcriptions of AURA's own voice
-                if _is_echo_of_self(text):
-                    print("[VOICE] Discarded input: it was an echo of AURA's own speech.")
-                    return ""
-                return text
-        finally:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-
-    except sr.UnknownValueError:
-        print("[Could not understand audio. Try speaking clearly.]")
-        return ""
-    except sr.RequestError as e:
-        print(f"[Could not request results; {e}]")
-        return ""
     except Exception as e:
         print(f"\n[Microphone Error]: {e}")
         return "SWITCH_TO_TEXT_MODE"
@@ -796,6 +992,8 @@ def get_wakeword_status():
         "error": wakeword_model_error,
         "false_positives_today": wakeword_false_positives,
         "last_inference_ms": round(_last_inference_latency_ms, 2),
+        "stt_backend": os.environ.get("AURA_STT_BACKEND", "local"),
+        "stt_model": os.environ.get("AURA_STT_MODEL", "tiny.en"),
     }
 
 
@@ -915,9 +1113,18 @@ def start_wakeword_listener(callback):
                 _last_inference_latency_ms = (time.perf_counter() - t_start) * 1000.0
 
                 for mdl, score in prediction.items():
+                    # Read thresholds dynamically so Settings UI changes take effect immediately.
+                    cur_threshold = _env_float("AURA_WAKEWORD_THRESHOLD", threshold)
+                    cur_speaking_threshold = _env_float("AURA_WAKEWORD_SPEAKING_THRESHOLD", speaking_threshold)
+                    cur_cooldown = _env_float("AURA_WAKEWORD_COOLDOWN", cooldown)
+                    try:
+                        cur_persistence = max(1, int(os.environ.get("AURA_WAKEWORD_PERSISTENCE", persistence)))
+                    except ValueError:
+                        cur_persistence = persistence
+
                     # Higher threshold while AURA is speaking to prevent self-triggering,
                     # but a loud/close "Hey Aura" can still interrupt (barge-in).
-                    thr = speaking_threshold if is_speaking else threshold
+                    thr = cur_speaking_threshold if is_speaking else cur_threshold
                     now = time.time()
                     
                     # Strict consecutive persistence: full phrase must sustain high scores
@@ -928,9 +1135,9 @@ def start_wakeword_listener(callback):
                         consec_high = 0
 
                     # Detection requires sustained consecutive frames meeting the threshold
-                    is_detected = (score >= thr and consec_high >= persistence)
+                    is_detected = (score >= thr and consec_high >= cur_persistence)
 
-                    if is_detected and (now - last_detect) >= cooldown:
+                    if is_detected and (now - last_detect) >= cur_cooldown:
                         # Refractory period: ignore detections in the first second
                         # after AURA finishes speaking - that's just her own echo.
                         if not is_speaking and (now - _last_speak_end) < 1.0:

@@ -238,6 +238,109 @@ window.AuraReactor = (() => {
         ctx.restore();
     }
 
+    // ── 3D Audio-Reactive Holographic Particle Mesh ──
+    const HOLO_POINTS = [];
+    const PHI = (1 + Math.sqrt(5)) / 2; // Golden ratio
+    const ICOS = [
+        [-1, PHI, 0], [1, PHI, 0], [-1, -PHI, 0], [1, -PHI, 0],
+        [0, -1, PHI], [0, 1, PHI], [0, -1, -PHI], [0, 1, -PHI],
+        [PHI, 0, -1], [PHI, 0, 1], [-PHI, 0, -1], [-PHI, 0, 1]
+    ];
+    for (let i = 0; i < ICOS.length; i++) {
+        const v = ICOS[i];
+        const len = Math.hypot(v[0], v[1], v[2]);
+        HOLO_POINTS.push([v[0] / len, v[1] / len, v[2] / len]);
+    }
+    for (let i = 0; i < ICOS.length; i++) {
+        for (let j = i + 1; j < ICOS.length; j++) {
+            const v1 = ICOS[i], v2 = ICOS[j];
+            const d = Math.hypot(v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]);
+            if (d < 2.1) {
+                const mx = (v1[0] + v2[0]) / 2;
+                const my = (v1[1] + v2[1]) / 2;
+                const mz = (v1[2] + v2[2]) / 2;
+                const mlen = Math.hypot(mx, my, mz);
+                HOLO_POINTS.push([mx / mlen, my / mlen, mz / mlen]);
+            }
+        }
+    }
+
+    function drawHoloMesh(cx, cy, R, t) {
+        const prof = PROFILE[state] || PROFILE.idle;
+        const live = hasLive();
+        const baseR = R * 0.22;
+        const rotY = t * 0.65 * prof.speed;
+        const rotX = Math.sin(t * 0.4) * 0.45;
+        const rotZ = Math.cos(t * 0.3) * 0.25;
+
+        const sinY = Math.sin(rotY), cosY = Math.cos(rotY);
+        const sinX = Math.sin(rotX), cosX = Math.cos(rotX);
+        const sinZ = Math.sin(rotZ), cosZ = Math.cos(rotZ);
+
+        const projected = [];
+        const fov = baseR * 3.5;
+
+        for (let i = 0; i < HOLO_POINTS.length; i++) {
+            const pt = HOLO_POINTS[i];
+            let deformation = 1.0;
+            if (live && liveFreq && liveFreq.length) {
+                const fIdx = Math.floor((i / HOLO_POINTS.length) * (liveFreq.length - 1));
+                deformation += (liveFreq[fIdx] / 255.0) * 0.65 * prof.energy + level * 0.3;
+            } else {
+                deformation += Math.sin(t * 3.2 + i * 0.7) * 0.12 * prof.energy + level * 0.25;
+            }
+
+            const rad = baseR * deformation;
+            const x = pt[0] * rad;
+            const y = pt[1] * rad;
+            const z = pt[2] * rad;
+
+            const x1 = x * cosY + z * sinY;
+            const z1 = -x * sinY + z * cosY;
+            const y2 = y * cosX - z1 * sinX;
+            const z2 = y * sinX + z1 * cosX;
+            const x3 = x1 * cosZ - y2 * sinZ;
+            const y3 = x1 * sinZ + y2 * cosZ;
+
+            const scale = fov / (fov + z2 + baseR * 1.5);
+            projected.push({
+                px: cx + x3 * scale,
+                py: cy + y3 * scale,
+                z: z2,
+                scale: scale
+            });
+        }
+
+        ctx.save();
+        ctx.lineWidth = 1;
+        for (let i = 0; i < projected.length; i++) {
+            for (let j = i + 1; j < projected.length; j++) {
+                const dx = projected[i].px - projected[j].px;
+                const dy = projected[i].py - projected[j].py;
+                const dist = Math.hypot(dx, dy);
+                if (dist < baseR * 0.95) {
+                    const avgScale = (projected[i].scale + projected[j].scale) * 0.5;
+                    const alpha = Math.max(0.05, (1.0 - dist / (baseR * 0.95)) * 0.45 * avgScale);
+                    ctx.strokeStyle = rgba(col(), alpha);
+                    ctx.beginPath();
+                    ctx.moveTo(projected[i].px, projected[i].py);
+                    ctx.lineTo(projected[j].px, projected[j].py);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        for (let i = 0; i < projected.length; i++) {
+            const pt = projected[i];
+            const size = Math.max(0.8, 1.8 * pt.scale);
+            ctx.fillStyle = rgba(col(), Math.min(1.0, 0.75 * pt.scale + 0.2));
+            ctx.beginPath();
+            ctx.arc(pt.px, pt.py, size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
     function drawCore(cx, cy, R, t) {
         const breathe = reduceMotion.matches ? 0 : (Math.sin(t * 1.15) * 0.5 + 0.5) * 0.10;
         const rc = Math.max(8, R * 0.26 * (1 + breathe + level * 0.35));
@@ -314,6 +417,157 @@ window.AuraReactor = (() => {
         ctx.restore();
     }
 
+    // ── Visualizer Mode Support (Reactor / Hologram / Oscilloscope) ──
+    let visMode = localStorage.getItem('aura_visualizer_mode') || 'reactor';
+
+    function setMode(m) {
+        if (!['reactor', 'hologram', 'oscilloscope'].includes(m)) m = 'reactor';
+        visMode = m;
+        try {
+            localStorage.setItem('aura_visualizer_mode', m);
+        } catch (_) {}
+        const btns = document.querySelectorAll('.reactor-mode-selector [data-mode]');
+        btns.forEach(b => {
+            b.classList.toggle('active', b.getAttribute('data-mode') === m);
+        });
+        dirty = true;
+    }
+
+    function initModeButtons() {
+        const btns = document.querySelectorAll('.reactor-mode-selector [data-mode]');
+        btns.forEach(b => {
+            b.onclick = () => {
+                const targetMode = b.getAttribute('data-mode');
+                setMode(targetMode);
+                window.audioSys?.playBeep(700, 0.04);
+            };
+        });
+        setMode(visMode);
+    }
+
+    function drawHologramMode(cx, cy, R, t) {
+        const color = col();
+        const prof = PROFILE[state] || PROFILE.idle;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+
+        // 3D Gimbal orbital rings
+        const rings = [
+            { rx: R * 0.78, ry: R * 0.28, rot: t * 0.4 * prof.speed, dash: [4, 4], lw: 1.2 },
+            { rx: R * 0.65, ry: R * 0.65, rot: -t * 0.3 * prof.speed, dash: [], lw: 1.0 },
+            { rx: R * 0.38, ry: R * 0.72, rot: t * 0.5 * prof.speed, dash: [8, 4], lw: 1.5 }
+        ];
+        rings.forEach(ring => {
+            ctx.save();
+            ctx.rotate(ring.rot);
+            ctx.beginPath();
+            if (ring.dash.length) ctx.setLineDash(ring.dash);
+            ctx.ellipse(0, 0, ring.rx, ring.ry, 0, 0, Math.PI * 2);
+            ctx.strokeStyle = rgba(color, 0.45);
+            ctx.lineWidth = ring.lw;
+            ctx.stroke();
+            ctx.restore();
+        });
+
+        ctx.restore();
+
+        // Expanded 3D Mesh
+        drawHoloMesh(cx, cy, R * 1.5, t);
+        drawCore(cx, cy, R * 0.7, t);
+    }
+
+    function drawOscilloscopeMode(cx, cy, R, t) {
+        const color = col();
+        const live = hasLive();
+        const prof = PROFILE[state] || PROFILE.idle;
+
+        ctx.save();
+        const gridW = Math.min(w * 0.88, 800);
+        const gridH = Math.min(h * 0.70, 320);
+        const gx = cx - gridW / 2;
+        const gy = cy - gridH / 2;
+
+        // Background tactical grid
+        ctx.strokeStyle = rgba(color, 0.12);
+        ctx.lineWidth = 1;
+        for (let y = gy; y <= gy + gridH; y += gridH / 6) {
+            ctx.beginPath();
+            ctx.moveTo(gx, y);
+            ctx.lineTo(gx + gridW, y);
+            ctx.stroke();
+        }
+        for (let x = gx; x <= gx + gridW; x += gridW / 12) {
+            ctx.beginPath();
+            ctx.moveTo(x, gy);
+            ctx.lineTo(x, gy + gridH);
+            ctx.stroke();
+        }
+
+        // Center line
+        ctx.strokeStyle = rgba(color, 0.35);
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(gx, cy);
+        ctx.lineTo(gx + gridW, cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Spectrum bars (FFT)
+        const barCount = 48;
+        const barW = (gridW / barCount) * 0.65;
+        const barGap = (gridW / barCount) * 0.35;
+        ctx.fillStyle = rgba(color, 0.65);
+        for (let i = 0; i < barCount; i++) {
+            let val = 0;
+            if (live && liveFreq && liveFreq.length) {
+                const idx = Math.floor((i / barCount) * liveFreq.length);
+                val = liveFreq[idx] / 255.0;
+            } else {
+                val = (Math.sin(t * 3.5 + i * 0.28) * 0.5 + 0.5) * 0.45 * prof.energy;
+            }
+            const barH = Math.max(2, val * (gridH * 0.42));
+            const bx = gx + i * (barW + barGap) + barGap / 2;
+            const by = gy + gridH - barH;
+
+            ctx.fillRect(bx, by, barW, barH);
+        }
+
+        // Centered Oscilloscope Line
+        ctx.strokeStyle = rgba(color, 0.95);
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = rgba(color, 0.85);
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+
+        const samples = 120;
+        const amp = (gridH * 0.35) * (0.4 + level * 0.6);
+        for (let i = 0; i < samples; i++) {
+            const frac = i / (samples - 1);
+            const x = gx + frac * gridW;
+            let y = 0;
+            if (live && liveTime && liveTime.length) {
+                const idx = Math.floor(frac * (liveTime.length - 1));
+                y = ((liveTime[idx] - 128) / 128) * amp;
+            } else {
+                const u = frac * 2 - 1;
+                y = synthScope(u, t) * amp;
+            }
+            if (i === 0) ctx.moveTo(x, cy + y);
+            else ctx.lineTo(x, cy + y);
+        }
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Tactical HUD metrics text
+        ctx.font = '10px monospace';
+        ctx.fillStyle = rgba(color, 0.7);
+        ctx.fillText('SPECTRUM // FFT 48-CH', gx + 8, gy + 16);
+        ctx.fillText(`RMS: ${(level * 100).toFixed(1)}%`, gx + gridW - 90, gy + 16);
+
+        ctx.restore();
+    }
+
     // ── Main loop (dt-based so speed is framerate-independent) ──
     function frame(now) {
         rafId = requestAnimationFrame(frame);
@@ -343,12 +597,19 @@ window.AuraReactor = (() => {
         const cy = (h - 18) / 2;
         const R = Math.max(42, Math.min(w * 0.5 - 14, h * 0.44));
 
-        drawScopes(cx, cy, R, t);
-        drawTicks(cx, cy, R);
-        drawArcs(cx, cy, R);
-        drawWaveform(cx, cy, R, t);
-        drawCoils(cx, cy, R, t);
-        drawCore(cx, cy, R, t);
+        if (visMode === 'hologram') {
+            drawHologramMode(cx, cy, R, t);
+        } else if (visMode === 'oscilloscope') {
+            drawOscilloscopeMode(cx, cy, R, t);
+        } else {
+            drawScopes(cx, cy, R, t);
+            drawTicks(cx, cy, R);
+            drawArcs(cx, cy, R);
+            drawWaveform(cx, cy, R, t);
+            drawCoils(cx, cy, R, t);
+            drawHoloMesh(cx, cy, R, t);
+            drawCore(cx, cy, R, t);
+        }
     }
 
     function start() {
@@ -369,6 +630,11 @@ window.AuraReactor = (() => {
 
     resize();
     start();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initModeButtons);
+    } else {
+        initModeButtons();
+    }
 
     return {
         setState(s) {
@@ -380,6 +646,8 @@ window.AuraReactor = (() => {
             if (status) status.textContent = s.toUpperCase();
         },
         setActive(on) { activeView = !!on; if (on) start(); else stop(); },
+        setMode,
+        getMode() { return visMode; },
         feed,
         clearFeed
     };

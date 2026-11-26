@@ -1,0 +1,117 @@
+{
+  "version": 2,
+  "skills": {
+    "brainstorming": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/brainstorming/SKILL.md",
+      "computedHash": "d3ff46d4a04a35a01a774d4dd05663bd79ba11ba8728cafe3943aeca474f1163"
+    },
+    "ckw-design": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/ckw-design/SKILL.md",
+      "computedHash": "524fe56a064b5a094d9512c2bdc6aef68f4e709646bd613c20cd981336f8f2b4"
+    },
+    "design-system": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/design-system/SKILL.md",
+      "computedHash": "a8659dc93133a89175b5b3d9bb8d0407ac019cc34a698f1357a45b99e46edb9c"
+    },
+    "design-taste-frontend": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/design-taste-frontend/SKILL.md",
+      "computedHash": "5bae376ee5e7e5026b273aaaebd46534e4df4ba5883f6f96e938f9b068a0ac88"
+    },
+    "fastapi-pro": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/fastapi-pro/SKILL.md",
+      "computedHash": "551b19ada597c4986aa1249c26eb9942a3a090ebf2848c6456c66a8c0c16bb01"
+    },
+    "frontend-api-integration-patterns": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-api-integration-patterns/SKILL.md",
+      "computedHash": "0ba0afc3b6b7aed104adb76a3af3cfd62a0270aea94a318d43eb1fef5b8e0c10"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "83485963700bcf11d5bf78118facb301676b69d918fee2e45a95e7f1a2840f6c"
+    },
+    "frontend-dev-guidelines": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-dev-guidelines/SKILL.md",
+      "computedHash": "6b6a1169e177fe4d5330a2441ceab7d0423f206269b7b4277872df67018d43ee"
+    },
+    "frontend-security-coder": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-security-coder/SKILL.md",
+      "computedHash": "9fc5fd7f8d14432fde667d3bfd9dcc6a00e9061f318ad06dbc7363eaa706f702"
+    },
+    "frontend-ui-engineering": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-ui-engineering/SKILL.md",
+      "computedHash": "89056a77b503d1562ddf6e2baec4ebf8f3f36b80bda3311763e347126ec865d4"
+    },
+    "mcp-builder": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/mcp-builder/SKILL.md",
+      "computedHash": "79d625ef28a805cd89900505b9d6ddf4c73efc176ffdac930fb43f5ffd35a1eb"
+    },
+    "playwright-skill": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/playwright-skill/SKILL.md",
+      "computedHash": "0f88438cba7e84143f8a7a5d93977ebdfdfcb976fe78ccb3d86eea672df173d1"
+    },
+    "python-pro": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/python-pro/SKILL.md",
+      "computedHash": "083e2c85e9f4725223b98a2acbfca061e5c8ff6646c5c88d927d1c4aae4712e6"
+    },
+    "python-testing-patterns": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/python-testing-patterns/SKILL.md",
+      "computedHash": "5278dba42ef01121b96d81ddb43c43e7575fb9306fa746a92d66ce45735a1066"
+    },
+    "tastegate": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/tastegate/SKILL.md",
+      "computedHash": "a35079f322909dc1c1aa76e45052f1dca2aa14e2444d07db6ed6e4c24f98ed1b"
+    },
+    "ui-ux-pro-max": {
+      "source": "sickn33/agentic-awesome-skills",
+      "commit": "166f581cfdc37d94cf56efe4454fb06a5759776c",
+      "sourceType": "github",
+      "skillPath": "skills/ui-ux-pro-max/SKILL.md",
+      "computedHash": "d5603f0cf12c8d27d0d779baebb6b5f3afe5e85c6baa499e33131b90502a844e"
+    }
+  }
+}

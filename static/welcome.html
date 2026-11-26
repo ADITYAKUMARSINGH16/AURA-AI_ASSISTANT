@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="landing.css?v=3">
 </head>
 <body>
+    <a href="#main-content" class="skip-link visually-hidden">Skip to main content</a>
 
     <noscript>
         <style>
@@ -102,7 +103,7 @@
             <a href="#capabilities" class="nav-link">SPECS</a>
         </div>
         <div class="nav-right">
-            <button class="sound-toggle" id="sound-toggle" title="Toggle ambient sound" aria-label="Toggle ambient sound" aria-pressed="false">
+            <button type="button" class="sound-toggle" id="sound-toggle" title="Toggle ambient sound" aria-label="Toggle ambient sound" aria-pressed="false">
                 <svg class="sound-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18">
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
@@ -121,6 +122,7 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- SECTION 1: HERO -->
     <!-- ═══════════════════════════════════════════════════════════ -->
+    <main id="main-content" tabindex="-1">
     <section class="hero" id="hero" data-reveal>
         <div class="ambient-orb orb-1" data-depth="0.2"></div>
         <div class="ambient-orb orb-2" data-depth="0.5"></div>
@@ -610,17 +612,18 @@
                 </div>
             </div>
             <div class="carousel-nav">
-                <button class="carousel-btn" id="carousel-prev" aria-label="Previous slide">◂</button>
+                <button type="button" class="carousel-btn" id="carousel-prev" aria-label="Previous slide">◂</button>
                 <div class="carousel-dots" id="carousel-dots" role="group" aria-label="Slide selector">
                     <button type="button" class="c-dot active" aria-label="Go to slide 1"></button>
                     <button type="button" class="c-dot" aria-label="Go to slide 2"></button>
                     <button type="button" class="c-dot" aria-label="Go to slide 3"></button>
                     <button type="button" class="c-dot" aria-label="Go to slide 4"></button>
                 </div>
-                <button class="carousel-btn" id="carousel-next" aria-label="Next slide">▸</button>
+                <button type="button" class="carousel-btn" id="carousel-next" aria-label="Next slide">▸</button>
             </div>
         </div>
     </section>
+    </main>
 
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- FOOTER -->

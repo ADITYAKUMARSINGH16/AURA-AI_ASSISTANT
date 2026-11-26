@@ -19,6 +19,7 @@
 const Realtime = (() => {
     const CADENCE = {
         telemetry: 3,
+        ambient_update: 3,
         permissions_update: 3,
         notifications_update: 3,
         processes_update: 5,

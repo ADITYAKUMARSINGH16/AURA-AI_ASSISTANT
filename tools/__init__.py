@@ -11,3 +11,8 @@ from .security_tools import get_windows_defender_status, get_firewall_status, ge
 from .planner_tools import report_progress, create_temporary_plan
 from .goal_tools import create_goal, list_goals, toggle_goal
 from .diagnostic_tools import run_aura_diagnostics
+from .uia_tools import list_open_windows, get_window_controls, click_ui_element, set_ui_element_text
+from .interpreter_tools import execute_python_code
+from .rag_tools import index_desktop_directory, query_desktop_knowledge, list_indexed_documents, clear_indexed_documents
+from .ambient_tools import get_ambient_context
+from .mcp_tools import list_mcp_servers, reload_mcp_servers, call_mcp_tool

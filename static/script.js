@@ -5,11 +5,28 @@ class AudioEngine {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.value = 0.3;
+        this.muted = localStorage.getItem('aura_sfx_muted') === 'true';
+        this.masterGain.gain.value = this.muted ? 0.0 : 0.3;
         this.masterGain.connect(this.ctx.destination);
     }
 
+    setMuted(mute) {
+        this.muted = !!mute;
+        localStorage.setItem('aura_sfx_muted', this.muted ? 'true' : 'false');
+        if (this.masterGain && this.ctx) {
+            this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+            this.masterGain.gain.setValueAtTime(this.muted ? 0.0 : 0.3, this.ctx.currentTime);
+        }
+        updateSfxUi();
+    }
+
+    toggleMute() {
+        this.setMuted(!this.muted);
+        return this.muted;
+    }
+
     playTyping() {
+        if (this.muted) return;
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
@@ -25,6 +42,7 @@ class AudioEngine {
     }
 
     playHum() {
+        if (this.muted) return;
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
@@ -43,6 +61,70 @@ class AudioEngine {
         lfoGain.connect(gain.gain);
         lfo.start();
     }
+
+    playBeep(freq = 880, duration = 0.05, type = 'sine') {
+        if (this.muted) return;
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+    }
+
+    playSuccess() {
+        if (this.muted) return;
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, now); // D5
+        osc.frequency.setValueAtTime(880, now + 0.07); // A5
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    }
+
+    playError() {
+        if (this.muted) return;
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(140, now + 0.15);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + 0.15);
+    }
+}
+
+function updateSfxUi() {
+    const isMuted = localStorage.getItem('aura_sfx_muted') === 'true';
+    const onIcon = document.getElementById('sfx-icon-on');
+    const offIcon = document.getElementById('sfx-icon-off');
+    const btn = document.getElementById('btn-audio-sfx');
+    if (onIcon && offIcon) {
+        onIcon.style.display = isMuted ? 'none' : 'block';
+        offIcon.style.display = isMuted ? 'block' : 'none';
+    }
+    if (btn) {
+        btn.setAttribute('aria-pressed', isMuted ? 'false' : 'true');
+        btn.title = isMuted ? 'UI Sound Effects: Muted (Click to unmute)' : 'UI Sound Effects: Active (Click to mute)';
+    }
 }
 
 let audioSys = null;
@@ -52,6 +134,7 @@ document.addEventListener('click', () => {
     if (!audioSys) {
         audioSys = new AudioEngine();
         audioSys.playHum();
+        updateSfxUi();
     }
 }, { once: true });
 
@@ -147,10 +230,12 @@ function isViewActive(name) {
 // ── Confirmation modal for destructive actions ──
 const confirmModal = document.getElementById('confirm-modal');
 let confirmResolve = null;
+let lastConfirmTrigger = null;
 
 function confirmAction({ title = 'Confirm action', message = 'Are you sure?', okLabel = 'CONFIRM' } = {}) {
     return new Promise((resolve) => {
         confirmResolve = resolve;
+        lastConfirmTrigger = document.activeElement;
         document.getElementById('confirm-title').textContent = title;
         document.getElementById('confirm-message').textContent = message;
         const okBtn = document.getElementById('confirm-ok');
@@ -166,6 +251,10 @@ function settleConfirm(result) {
         confirmResolve = null;
     }
     confirmModal.classList.remove('active');
+    if (lastConfirmTrigger && typeof lastConfirmTrigger.focus === 'function') {
+        lastConfirmTrigger.focus();
+    }
+    lastConfirmTrigger = null;
 }
 
 document.getElementById('confirm-ok')?.addEventListener('click', () => settleConfirm(true));
@@ -203,13 +292,17 @@ function showView(name) {
     if (titleEl) titleEl.textContent = section?.dataset.title || name;
     try { localStorage.setItem('aura-view', name); } catch (e) {}
     // Lazy-init panels that own hardware/network resources
-    if (name === 'security') { initWebcam(); fetchThreats(); }
+    if (name === 'security') { initWebcam(); fetchThreats(); fetchNetworkScan(); }
     // Reactor render loop only burns frames while the Reactor view is up
     reactor.setActive(name === 'reactor');
     // Bus events for hidden views are intentionally dropped; on activation,
     // pull one fresh snapshot immediately instead of waiting for the next tick.
     if (name === 'system') { fetchProcesses(); fetchLogs(); }
-    if (name === 'settings') { initQuickActionsEditor(); }
+    if (name === 'settings') {
+        initQuickActionsEditor();
+        loadEnvSettings();
+        if (typeof fetchProactiveConfig === 'function') fetchProactiveConfig();
+    }
     // In drawer mode (≤820px), choosing a destination closes the drawer.
     if (window.matchMedia('(max-width: 820px)').matches) setDrawer(false);
 }
@@ -326,6 +419,11 @@ function setAuraState(state) {
             state === 'processing' ? 'THINKING' :
             state === 'speaking' ? 'SPEAKING' :
             state === 'error' ? 'ERROR' : 'ONLINE';
+    }
+    const overlay = document.getElementById('voice-overlay');
+    if (overlay) {
+        overlay.classList.remove('state-idle', 'state-listening', 'state-processing', 'state-speaking', 'state-error', 'state-interrupted');
+        overlay.classList.add(`state-${state}`);
     }
     reactor.setState(state);
 }
@@ -495,22 +593,47 @@ function showToast(title, message, type = 'info') {
 const shortcutsModal = document.getElementById('shortcuts-modal');
 const btnShortcuts = document.getElementById('btn-shortcuts');
 const btnCloseShortcuts = document.getElementById('close-shortcuts');
+let lastShortcutsTrigger = null;
+
+function openShortcuts() {
+    lastShortcutsTrigger = document.activeElement;
+    shortcutsModal.classList.add('active');
+    btnCloseShortcuts?.focus();
+}
+
+function closeShortcuts() {
+    shortcutsModal.classList.remove('active');
+    if (lastShortcutsTrigger && typeof lastShortcutsTrigger.focus === 'function') {
+        lastShortcutsTrigger.focus();
+    }
+    lastShortcutsTrigger = null;
+}
 
 function toggleShortcuts() {
-    shortcutsModal.classList.toggle('active');
+    if (shortcutsModal.classList.contains('active')) closeShortcuts();
+    else openShortcuts();
 }
 
 btnShortcuts.addEventListener('click', toggleShortcuts);
-btnCloseShortcuts.addEventListener('click', () => shortcutsModal.classList.remove('active'));
+btnCloseShortcuts.addEventListener('click', closeShortcuts);
 shortcutsModal.addEventListener('click', (e) => {
-    if (e.target === shortcutsModal) shortcutsModal.classList.remove('active');
+    if (e.target === shortcutsModal) closeShortcuts();
 });
 
 document.addEventListener('keydown', (e) => {
+    // Ctrl + K or Cmd + K: Toggle Command Palette Spotlight
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        if (isPaletteOpen()) closePalette();
+        else openPalette();
+        return;
+    }
+
     if (e.key === 'Escape') {
+        if (isPaletteOpen()) { closePalette(); return; }
         if (confirmModal.classList.contains('active')) { settleConfirm(false); return; }
-        if (shortcutsModal.classList.contains('active')) { shortcutsModal.classList.remove('active'); return; }
-        if (document.getElementById('lightbox-overlay').classList.contains('open')) { document.getElementById('lightbox-overlay').classList.remove('open'); return; }
+        if (shortcutsModal.classList.contains('active')) { closeShortcuts(); return; }
+        if (document.getElementById('lightbox-overlay').classList.contains('open')) { closeLightbox(); return; }
         document.getElementById('notif-drawer')?.classList.remove('open');
         return;
     }
@@ -549,6 +672,278 @@ document.addEventListener('keydown', (e) => {
         }
     }
 });
+
+// ═══════════════════════════════════════════════════════════
+// COMMAND PALETTE SPOTLIGHT ENGINE (Ctrl+K)
+// ═══════════════════════════════════════════════════════════
+const PALETTE_COMMANDS = [
+    // Navigation
+    { id: 'nav-chat', title: 'Go to Chat', category: 'Navigation', icon: '💬', shortcut: '1', action: () => showView('chat') },
+    { id: 'nav-reactor', title: 'Go to Reactor Core', category: 'Navigation', icon: '⚛', shortcut: '2', action: () => showView('reactor') },
+    { id: 'nav-system', title: 'Go to System Diagnostics', category: 'Navigation', icon: '📊', shortcut: '3', action: () => showView('system') },
+    { id: 'nav-security', title: 'Go to Security Center', category: 'Navigation', icon: '🛡', shortcut: '4', action: () => showView('security') },
+    { id: 'nav-files', title: 'Go to File Explorer', category: 'Navigation', icon: '📁', shortcut: '5', action: () => showView('files') },
+    { id: 'nav-memory', title: 'Go to Memory Archive', category: 'Navigation', icon: '🧠', shortcut: '6', action: () => showView('memory') },
+    { id: 'nav-settings', title: 'Go to Settings', category: 'Navigation', icon: '⚙', shortcut: '7', action: () => showView('settings') },
+    
+    // Voice & Audio
+    { id: 'act-voice-overlay', title: 'Fullscreen Voice Assistant', category: 'Voice & Audio', icon: '🎙', shortcut: 'Ctrl+Space', action: () => {
+        openVoiceOverlay();
+        if (canStartListening() && voiceBtn) voiceBtn.click();
+    }},
+    { id: 'act-voice-mic', title: 'Toggle Voice Microphone', category: 'Voice & Audio', icon: '🎤', shortcut: 'Ctrl+M', action: () => {
+        if (voiceBtn) voiceBtn.click();
+    }},
+    { id: 'act-wake-test', title: 'Test Wake Word Detection ("Hey Aura")', category: 'Voice & Audio', icon: '👂', action: () => {
+        document.getElementById('btn-wake-test')?.click();
+    }},
+    { id: 'act-sfx-toggle', title: 'Toggle Audio SFX (Mute / Unmute)', category: 'Voice & Audio', icon: '🔊', action: () => {
+        if (audioSys) {
+            const muted = audioSys.toggleMute();
+            showToast('AUDIO', muted ? 'Sound effects muted' : 'Sound effects enabled', 'info');
+        }
+    }},
+
+    // Voice Models
+    { id: 'voice-ava', title: 'Set Voice: Ava (Ultra-Realistic Female)', category: 'Voice & Audio', icon: '🎙️', action: () => {
+        localStorage.setItem('aura_tts_voice', 'en-US-AvaNeural');
+        const sel = document.getElementById('tts-voice-select');
+        if (sel) sel.value = 'en-US-AvaNeural';
+        api('/api/voice/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ voice: 'en-US-AvaNeural' }) });
+        showToast('VOICE ENGINE', 'Voice set to Ava (Ultra-Realistic Conversational).', 'info');
+    }},
+    { id: 'voice-andrew', title: 'Set Voice: Andrew (Natural Conversational Male)', category: 'Voice & Audio', icon: '🎙️', action: () => {
+        localStorage.setItem('aura_tts_voice', 'en-US-AndrewNeural');
+        const sel = document.getElementById('tts-voice-select');
+        if (sel) sel.value = 'en-US-AndrewNeural';
+        api('/api/voice/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ voice: 'en-US-AndrewNeural' }) });
+        showToast('VOICE ENGINE', 'Voice set to Andrew (Warm Natural Male).', 'info');
+    }},
+    { id: 'voice-sonia', title: 'Set Voice: Sonia (Sophisticated British Female - Jarvis/Friday)', category: 'Voice & Audio', icon: '🎙️', action: () => {
+        localStorage.setItem('aura_tts_voice', 'en-GB-SoniaNeural');
+        const sel = document.getElementById('tts-voice-select');
+        if (sel) sel.value = 'en-GB-SoniaNeural';
+        api('/api/voice/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ voice: 'en-GB-SoniaNeural' }) });
+        showToast('VOICE ENGINE', 'Voice set to Sonia (Sophisticated British).', 'info');
+    }},
+    { id: 'voice-jenny', title: 'Set Voice: Jenny (Warm Friendly Female)', category: 'Voice & Audio', icon: '🎙️', action: () => {
+        localStorage.setItem('aura_tts_voice', 'en-US-JennyNeural');
+        const sel = document.getElementById('tts-voice-select');
+        if (sel) sel.value = 'en-US-JennyNeural';
+        api('/api/voice/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ voice: 'en-US-JennyNeural' }) });
+        showToast('VOICE ENGINE', 'Voice set to Jenny (Warm & Friendly).', 'info');
+    }},
+
+    // Themes
+    { id: 'theme-cyan', title: 'Switch Theme: Tactical Cyan (Default)', category: 'Themes', icon: '🔷', action: () => setTheme('') },
+    { id: 'theme-amber', title: 'Switch Theme: Amber Tactical Alert', category: 'Themes', icon: '🟠', action: () => setTheme('theme-amber') },
+    { id: 'theme-crimson', title: 'Switch Theme: Crimson Alert', category: 'Themes', icon: '🔴', action: () => setTheme('theme-crimson') },
+    { id: 'theme-emerald', title: 'Switch Theme: Matrix Emerald', category: 'Themes', icon: '🟢', action: () => setTheme('theme-emerald') },
+    { id: 'theme-violet', title: 'Switch Theme: Psionic Violet', category: 'Themes', icon: '🟣', action: () => setTheme('theme-violet') },
+
+    // Actions & Tools
+    { id: 'act-clear', title: 'Clear Console & Chat Output', category: 'Actions', icon: '🧹', shortcut: 'Ctrl+L', action: () => {
+        terminalOutput.innerHTML = '';
+        chatOutput.innerHTML = '';
+        showToast('SYSTEM', 'Console cleared.', 'info');
+    }},
+    { id: 'act-sec-scan', title: 'Run Security Sweep', category: 'Actions', icon: '⚡', action: () => {
+        showView('security');
+        document.getElementById('btn-sec-refresh')?.click();
+    }},
+    { id: 'act-net-scan', title: 'Scan Local Network Grid', category: 'Actions', icon: '🌐', action: () => {
+        showView('security');
+        document.getElementById('btn-net-scan')?.click();
+    }},
+    { id: 'act-telemetry-refresh', title: 'Refresh System Telemetry', category: 'Actions', icon: '🔄', action: () => {
+        fetchTelemetry();
+        showToast('SYSTEM', 'Telemetry refreshed', 'info');
+    }},
+    { id: 'act-screen-capture', title: 'Inspect Screen Capture', category: 'Actions', icon: '📷', action: () => {
+        showView('files');
+        refreshScreenPreview();
+    }},
+    { id: 'act-shortcuts', title: 'Show Keyboard Shortcuts Modal', category: 'Help', icon: '❓', shortcut: '?', action: () => {
+        shortcutsModal?.classList.add('active');
+    }}
+];
+
+let paletteActiveIndex = 0;
+let paletteFiltered = [];
+
+function isPaletteOpen() {
+    const el = document.getElementById('command-palette-overlay');
+    return el && !el.hidden;
+}
+
+function openPalette() {
+    const el = document.getElementById('command-palette-overlay');
+    const input = document.getElementById('palette-input');
+    if (!el || !input) return;
+    el.hidden = false;
+    input.value = '';
+    filterPalette('');
+    setTimeout(() => input.focus(), 40);
+    audioSys?.playBeep(980, 0.04);
+}
+
+function closePalette() {
+    const el = document.getElementById('command-palette-overlay');
+    if (!el || el.hidden) return;
+    el.hidden = true;
+    audioSys?.playBeep(640, 0.04);
+}
+
+function filterPalette(query) {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) {
+        paletteFiltered = [...PALETTE_COMMANDS];
+    } else {
+        paletteFiltered = PALETTE_COMMANDS.filter(cmd => 
+            cmd.title.toLowerCase().includes(q) || 
+            cmd.category.toLowerCase().includes(q)
+        );
+    }
+    paletteActiveIndex = 0;
+    renderPaletteResults();
+}
+
+function renderPaletteResults() {
+    const list = document.getElementById('palette-results');
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (paletteFiltered.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'palette-item';
+        empty.style.color = 'var(--text-dim)';
+        empty.textContent = 'No matching commands found.';
+        list.appendChild(empty);
+        return;
+    }
+
+    let lastCategory = '';
+    paletteFiltered.forEach((cmd, idx) => {
+        if (cmd.category !== lastCategory) {
+            lastCategory = cmd.category;
+            const catDiv = document.createElement('div');
+            catDiv.className = 'palette-category';
+            catDiv.textContent = cmd.category;
+            list.appendChild(catDiv);
+        }
+
+        const item = document.createElement('div');
+        item.className = 'palette-item' + (idx === paletteActiveIndex ? ' active' : '');
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', idx === paletteActiveIndex ? 'true' : 'false');
+        item.innerHTML = `
+            <span class="palette-item-icon">${cmd.icon}</span>
+            <span class="palette-item-text">${escapeHtml(cmd.title)}</span>
+            ${cmd.shortcut ? `<span class="palette-item-shortcut">${escapeHtml(cmd.shortcut)}</span>` : ''}
+        `;
+
+        item.addEventListener('click', () => {
+            executePaletteCommand(cmd);
+        });
+
+        item.addEventListener('mouseenter', () => {
+            paletteActiveIndex = idx;
+            updatePaletteActiveItem();
+        });
+
+        list.appendChild(item);
+    });
+
+    scrollPaletteActiveIntoView();
+}
+
+function updatePaletteActiveItem() {
+    const items = document.querySelectorAll('.palette-results .palette-item:not([style*="text-dim"])');
+    items.forEach((it, idx) => {
+        if (idx === paletteActiveIndex) {
+            it.classList.add('active');
+            it.setAttribute('aria-selected', 'true');
+        } else {
+            it.classList.remove('active');
+            it.setAttribute('aria-selected', 'false');
+        }
+    });
+}
+
+function scrollPaletteActiveIntoView() {
+    const active = document.querySelector('.palette-results .palette-item.active');
+    if (active) {
+        active.scrollIntoView({ block: 'nearest' });
+    }
+}
+
+function executePaletteCommand(cmd) {
+    if (!cmd) return;
+    closePalette();
+    audioSys?.playSuccess();
+    try {
+        cmd.action();
+    } catch (err) {
+        console.error('Palette command failed:', err);
+    }
+}
+
+function initCommandPalette() {
+    const btnSpotlight = document.getElementById('btn-spotlight');
+    if (btnSpotlight) {
+        btnSpotlight.addEventListener('click', openPalette);
+    }
+
+    const btnSfx = document.getElementById('btn-audio-sfx');
+    if (btnSfx) {
+        btnSfx.addEventListener('click', () => {
+            if (audioSys) {
+                const muted = audioSys.toggleMute();
+                showToast('AUDIO', muted ? 'Sound effects muted' : 'Sound effects enabled', 'info');
+            }
+        });
+        updateSfxUi();
+    }
+
+    const overlay = document.getElementById('command-palette-overlay');
+    const input = document.getElementById('palette-input');
+    const backdrop = overlay?.querySelector('.palette-backdrop');
+    const escBadge = overlay?.querySelector('.palette-esc-badge');
+
+    if (backdrop) backdrop.addEventListener('click', closePalette);
+    if (escBadge) escBadge.addEventListener('click', closePalette);
+
+    if (input) {
+        input.addEventListener('input', () => filterPalette(input.value));
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (paletteFiltered.length > 0) {
+                    paletteActiveIndex = (paletteActiveIndex + 1) % paletteFiltered.length;
+                    updatePaletteActiveItem();
+                    scrollPaletteActiveIntoView();
+                    audioSys?.playBeep(1100, 0.02);
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (paletteFiltered.length > 0) {
+                    paletteActiveIndex = (paletteActiveIndex - 1 + paletteFiltered.length) % paletteFiltered.length;
+                    updatePaletteActiveItem();
+                    scrollPaletteActiveIntoView();
+                    audioSys?.playBeep(1100, 0.02);
+                }
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (paletteFiltered.length > 0 && paletteFiltered[paletteActiveIndex]) {
+                    executePaletteCommand(paletteFiltered[paletteActiveIndex]);
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closePalette();
+            }
+        });
+    }
+}
 
 // ═══════════════════════════════════════════════════════════
 // AUDIO ANALYSERS (mic + TTS feed the reactor)
@@ -595,10 +990,41 @@ async function playTTS(text) {
             body: JSON.stringify({is_speaking: true})
         });
 
-        const response = await api(`/api/tts?text=${encodeURIComponent(text)}`, { timeout: 30000 });
+        const chosenVoice = localStorage.getItem('aura_tts_voice') || 'en-US-AvaNeural';
+        const chosenRate = localStorage.getItem('aura_tts_rate') || '+0%';
+        const chosenBackend = localStorage.getItem('aura_tts_backend') || '';
+        const backendParam = chosenBackend ? `&backend=${encodeURIComponent(chosenBackend)}` : '';
+        const response = await api(`/api/tts?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(chosenVoice)}&rate=${encodeURIComponent(chosenRate)}${backendParam}`, { timeout: 30000 });
         if (!response.ok) throw new Error('TTS fetch failed');
 
+        if (response.status === 204) {
+            finished = true;
+            isTtsPlaying = false;
+            updateQueuePill();
+            setAuraState('idle');
+            api('/api/voice/speaking', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({is_speaking: false})
+            }).catch(() => {});
+            processTtsQueue();
+            return;
+        }
+
         const blob = await response.blob();
+        if (!blob || blob.size === 0) {
+            finished = true;
+            isTtsPlaying = false;
+            updateQueuePill();
+            setAuraState('idle');
+            api('/api/voice/speaking', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({is_speaking: false})
+            }).catch(() => {});
+            processTtsQueue();
+            return;
+        }
         url = URL.createObjectURL(blob);
 
         audio = new Audio(url);
@@ -818,12 +1244,16 @@ async function appendToTerminal(text, type = 'system') {
     terminalOutput.appendChild(termDiv);
     terminalOutput.scrollTop = terminalOutput.scrollHeight;
 
-    // 2. Append to Chat View (plain-text fallback; rich rendering
-    //    happens in the send flow for live responses)
+    // 2. Append to Chat View (with rich markdown, cognitive trace, and actions)
     const chatDiv = document.createElement('div');
     chatDiv.className = `chat-bubble bubble-${type === 'error' ? 'error' : type === 'user' ? 'user' : 'aura'}`;
-    chatDiv.textContent = text;
+    if (type === 'user') {
+        chatDiv.textContent = text;
+    } else {
+        chatDiv.innerHTML = formatAuraMarkdown(text, false);
+    }
     chatOutput.appendChild(chatDiv);
+    enhanceBubble(chatDiv, text);
     chatOutput.scrollTop = chatOutput.scrollHeight;
 }
 
@@ -922,33 +1352,374 @@ commandInput.addEventListener('input', () => {
     }
 });
 
-function enhanceLatestBubble(rawText = null) {
-    const bubbles = chatOutput.querySelectorAll('.chat-bubble:not(.thinking)');
-    if (bubbles.length === 0) return;
-    const latest = bubbles[bubbles.length - 1];
+function formatAuraMarkdown(rawText, isStreaming = false) {
+    if (!rawText) return '';
 
-    // Add Timestamp
+    // 1. Extract <think>...</think> or streaming <think>...
+    let thinkingHtml = '';
+    let bodyText = rawText;
+
+    const thinkMatch = rawText.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+    if (thinkMatch) {
+        const thinkingContent = thinkMatch[1].trim();
+        const isOpen = isStreaming || !rawText.includes('</think>');
+        if (thinkingContent) {
+            let parsedThinking = thinkingContent;
+            if (window.marked && window.DOMPurify) {
+                parsedThinking = DOMPurify.sanitize(marked.parse(thinkingContent));
+            } else {
+                parsedThinking = escapeHtml(thinkingContent).replace(/\n/g, '<br>');
+            }
+            thinkingHtml = `
+                <details class="aura-thinking-block" ${isOpen ? 'open' : ''}>
+                    <summary class="thinking-summary">
+                        <span class="thinking-pulse"></span>
+                        <span class="thinking-label">COGNITIVE TRACE</span>
+                        <span class="thinking-badge">${isOpen ? 'REASONING...' : 'COMPLETE'}</span>
+                    </summary>
+                    <div class="thinking-content">${parsedThinking}</div>
+                </details>
+            `;
+        }
+        bodyText = rawText.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
+    }
+
+    let parsedBody = '';
+    if (bodyText) {
+        if (window.marked && window.DOMPurify) {
+            parsedBody = DOMPurify.sanitize(marked.parse(bodyText));
+        } else {
+            parsedBody = escapeHtml(bodyText).replace(/\n/g, '<br>');
+        }
+    }
+
+    return thinkingHtml + parsedBody;
+}
+
+function enhanceCodeBlocks(container) {
+    if (!container) return;
+    container.querySelectorAll('pre code').forEach((codeBlock) => {
+        const pre = codeBlock.parentElement;
+        if (!pre || pre.parentElement?.classList.contains('code-block-wrapper')) return;
+
+        // Detect language from class e.g. "language-python"
+        let lang = 'CODE';
+        codeBlock.classList.forEach(cls => {
+            if (cls.startsWith('language-')) {
+                lang = cls.replace('language-', '').toUpperCase();
+            }
+        });
+
+        // Highlight syntax if hljs is loaded
+        if (window.hljs && !codeBlock.classList.contains('hljs')) {
+            try { hljs.highlightElement(codeBlock); } catch (e) {}
+        }
+
+        // Create wrapper
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-block-wrapper';
+
+        // Create header
+        const header = document.createElement('div');
+        header.className = 'code-block-header';
+        header.innerHTML = `
+            <span class="code-lang-tag">${lang}</span>
+            <button class="code-copy-btn" title="Copy code" aria-label="Copy code">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy</span>
+            </button>
+        `;
+
+        const copyBtn = header.querySelector('.code-copy-btn');
+        copyBtn.addEventListener('click', () => {
+            const codeToCopy = codeBlock.innerText;
+            navigator.clipboard.writeText(codeToCopy);
+            audioSys?.playSuccess();
+            copyBtn.innerHTML = '<span>✓ Copied</span>';
+            setTimeout(() => {
+                copyBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span>Copy</span>
+                `;
+            }, 1500);
+        });
+
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(header);
+        wrapper.appendChild(pre);
+    });
+}
+
+function enhanceBubble(bubble, rawText = null) {
+    if (!bubble || bubble.classList.contains('thinking')) return;
+    
+    // First enhance code blocks
+    enhanceCodeBlocks(bubble);
+
+    // Prevent duplicate action bars
+    if (bubble.querySelector('.bubble-actions')) return;
+
+    const actionsBar = document.createElement('div');
+    actionsBar.className = 'bubble-actions';
+
+    // Timestamp
     const timeSpan = document.createElement('span');
     timeSpan.className = 'bubble-time';
     const now = new Date();
     timeSpan.textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-    latest.appendChild(timeSpan);
 
-    // Add Copy Button
+    // Clean text to copy
+    const textToCopy = rawText !== null ? rawText : bubble.innerText.trim();
+
+    // Copy Button
     const copyBtn = document.createElement('button');
-    copyBtn.className = 'copy-btn';
-    copyBtn.setAttribute('aria-label', 'Copy message');
-    copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
-
-    const textToCopy = rawText !== null ? rawText : latest.textContent.replace(timeSpan.textContent, '').trim();
-
+    copyBtn.className = 'action-btn-pill';
+    copyBtn.title = 'Copy message';
+    copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span>';
     copyBtn.addEventListener('click', () => {
         navigator.clipboard.writeText(textToCopy);
-        const originalHTML = copyBtn.innerHTML;
-        copyBtn.textContent = '✓';
-        setTimeout(() => { copyBtn.innerHTML = originalHTML; }, 1000);
+        audioSys?.playSuccess();
+        copyBtn.innerHTML = '<span>✓ Copied</span>';
+        setTimeout(() => {
+            copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span>';
+        }, 1500);
     });
-    latest.appendChild(copyBtn);
+    actionsBar.appendChild(copyBtn);
+
+    // Speak Button (for AURA messages)
+    if (bubble.classList.contains('bubble-aura')) {
+        const speakBtn = document.createElement('button');
+        speakBtn.className = 'action-btn-pill';
+        speakBtn.title = 'Speak aloud (TTS)';
+        speakBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg><span>Speak</span>';
+        speakBtn.addEventListener('click', () => {
+            audioSys?.playBeep(720, 0.05);
+            // Clean markdown tags for TTS
+            const cleanSpeech = textToCopy.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/[#*`_~]/g, '');
+            playTTS(cleanSpeech);
+        });
+        actionsBar.appendChild(speakBtn);
+
+        // Canvas View Button
+        const canvasBtn = document.createElement('button');
+        canvasBtn.className = 'action-btn-pill';
+        canvasBtn.title = 'Open in Canvas';
+        canvasBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg><span>Canvas</span>';
+        canvasBtn.addEventListener('click', () => {
+            AuraWorkspace.render('AURA Output', textToCopy);
+        });
+        actionsBar.appendChild(canvasBtn);
+    }
+
+    actionsBar.appendChild(timeSpan);
+    bubble.appendChild(actionsBar);
+}
+
+// ═══════════════════════════════════════════════════════════
+// DUAL-PANE ARTIFACT & CODE WORKSPACE CANVAS
+// ═══════════════════════════════════════════════════════════
+const AuraWorkspace = {
+    isOpen: false,
+    currentContent: '',
+
+    toggle(force) {
+        const pane = document.getElementById('workspace-canvas-pane');
+        const btn = document.getElementById('btn-toggle-canvas');
+        if (!pane) return;
+        this.isOpen = (force !== undefined) ? force : !this.isOpen;
+        pane.hidden = !this.isOpen;
+        if (btn) {
+            btn.classList.toggle('active', this.isOpen);
+            btn.setAttribute('aria-pressed', this.isOpen ? 'true' : 'false');
+        }
+        if (this.isOpen) {
+            audioSys?.playBeep(920, 0.04);
+        } else {
+            audioSys?.playBeep(600, 0.04);
+        }
+    },
+
+    render(title, content, type = 'markdown') {
+        const pane = document.getElementById('workspace-canvas-pane');
+        const titleEl = document.getElementById('canvas-title');
+        const bodyEl = document.getElementById('canvas-body');
+        if (!pane || !bodyEl) return;
+
+        this.currentContent = content || '';
+        if (titleEl) titleEl.textContent = title || 'Artifact Workspace';
+
+        if (!content) {
+            bodyEl.innerHTML = `
+                <div class="canvas-empty-state">
+                    <div class="canvas-empty-glyph">◫</div>
+                    <div class="canvas-empty-title">Artifact & Code Canvas</div>
+                    <div class="canvas-empty-subtitle">Generated reports, code files, diffs, and diagrams appear here.</div>
+                </div>
+            `;
+        } else {
+            if (type === 'code') {
+                bodyEl.innerHTML = `<pre><code>${escapeHtml(content)}</code></pre>`;
+                if (window.hljs) hljs.highlightElement(bodyEl.querySelector('pre code'));
+            } else if (window.marked && window.DOMPurify) {
+                bodyEl.innerHTML = DOMPurify.sanitize(marked.parse(content));
+                enhanceCodeBlocks(bodyEl);
+            } else {
+                bodyEl.innerHTML = `<pre>${escapeHtml(content)}</pre>`;
+            }
+        }
+
+        if (content && !this.isOpen) this.toggle(true);
+    }
+};
+window.AuraWorkspace = AuraWorkspace;
+
+function initWorkspaceCanvas() {
+    const btnToggle = document.getElementById('btn-toggle-canvas');
+    const btnClose = document.getElementById('canvas-close-btn');
+    const btnCopy = document.getElementById('canvas-copy-btn');
+
+    AuraWorkspace.toggle(false);
+
+    if (btnToggle) btnToggle.addEventListener('click', () => AuraWorkspace.toggle());
+    if (btnClose) btnClose.addEventListener('click', () => AuraWorkspace.toggle(false));
+    if (btnCopy) {
+        btnCopy.addEventListener('click', () => {
+            if (!AuraWorkspace.currentContent) return;
+            navigator.clipboard.writeText(AuraWorkspace.currentContent);
+            audioSys?.playSuccess();
+            btnCopy.textContent = 'COPIED!';
+            setTimeout(() => { btnCopy.textContent = 'COPY'; }, 1500);
+        });
+    }
+
+    // Keyboard shortcut Alt + C to toggle canvas
+    document.addEventListener('keydown', (e) => {
+        if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+            e.preventDefault();
+            AuraWorkspace.toggle();
+        }
+    });
+}
+
+// ═══════════════════════════════════════════════════════════
+// IN-LINE HUMAN-IN-THE-LOOP (HITL) PERMISSION CARD
+// ═══════════════════════════════════════════════════════════
+function renderHitlPermissionCard(ev) {
+    const actionId = ev.action_id || ev.id || ('act_' + Date.now());
+    let existing = document.getElementById(`hitl-perm-${actionId}`);
+    if (existing) return;
+
+    const card = document.createElement('div');
+    card.className = 'hitl-permission-card';
+    card.id = `hitl-perm-${actionId}`;
+    const risk = (ev.risk || 'medium').toLowerCase();
+    
+    card.innerHTML = `
+        <div class="hitl-header">
+            <span class="hitl-icon">⚠</span>
+            <span class="hitl-title">SECURITY CLEARANCE REQUIRED</span>
+            <span class="hitl-risk-badge risk-${risk}">${escapeHtml(risk.toUpperCase())} RISK</span>
+        </div>
+        <div class="hitl-body">
+            <div class="hitl-tool-row"><strong>Target Tool:</strong> <code>${escapeHtml(ev.tool || 'System Command')}</code></div>
+            ${ev.description ? `<div class="hitl-desc">${escapeHtml(ev.description)}</div>` : ''}
+        </div>
+        <div class="hitl-actions">
+            <button class="qa-btn primary hitl-btn-auth">AUTHORIZE</button>
+            <button class="qa-btn danger hitl-btn-reject">REJECT</button>
+        </div>
+    `;
+
+    const authBtn = card.querySelector('.hitl-btn-auth');
+    const rejectBtn = card.querySelector('.hitl-btn-reject');
+
+    authBtn.addEventListener('click', async () => {
+        authBtn.disabled = true;
+        rejectBtn.disabled = true;
+        try {
+            await api(`/api/permissions/confirm/${actionId}`, { method: 'POST' });
+        } catch (e) {}
+        card.className = 'hitl-permission-card authorized';
+        card.querySelector('.hitl-title').textContent = 'PERMISSION AUTHORIZED';
+        card.querySelector('.hitl-actions').innerHTML = '<span style="font-size:11px; color:var(--green); font-family:var(--font-mono);">✓ Operator clearance granted. Continuing execution...</span>';
+        audioSys?.playSuccess();
+        fetchPermissions();
+    });
+
+    rejectBtn.addEventListener('click', async () => {
+        authBtn.disabled = true;
+        rejectBtn.disabled = true;
+        try {
+            await api(`/api/permissions/reject/${actionId}`, { method: 'POST' });
+        } catch (e) {}
+        card.className = 'hitl-permission-card rejected';
+        card.querySelector('.hitl-title').textContent = 'PERMISSION DENIED';
+        card.querySelector('.hitl-actions').innerHTML = '<span style="font-size:11px; color:var(--danger); font-family:var(--font-mono);">✕ Action cancelled by operator.</span>';
+        audioSys?.playError();
+        fetchPermissions();
+    });
+
+    chatOutput.appendChild(card);
+    chatOutput.scrollTop = chatOutput.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SLASH COMMAND AUTOCOMPLETE
+// ═══════════════════════════════════════════════════════════
+function initSlashCommands() {
+    const popup = document.getElementById('slash-popup');
+    if (!commandInput || !popup) return;
+    popup.hidden = true;
+
+    commandInput.addEventListener('input', () => {
+        const val = commandInput.value;
+        if (val.startsWith('/')) {
+            const query = val.slice(1).toLowerCase();
+            const items = popup.querySelectorAll('.slash-item');
+            let hasMatch = false;
+            items.forEach(it => {
+                const cmd = it.getAttribute('data-cmd');
+                if (cmd.toLowerCase().includes(query)) {
+                    it.style.display = 'flex';
+                    hasMatch = true;
+                } else {
+                    it.style.display = 'none';
+                }
+            });
+            popup.hidden = !hasMatch;
+        } else {
+            popup.hidden = true;
+        }
+    });
+
+    popup.querySelectorAll('.slash-item').forEach(it => {
+        it.addEventListener('click', () => {
+            const cmd = it.getAttribute('data-cmd');
+            commandInput.value = cmd;
+            popup.hidden = true;
+            commandInput.focus();
+            audioSys?.playBeep(880, 0.04);
+        });
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.input-row')) {
+            popup.hidden = true;
+        }
+    });
+}
+
+function enhanceLatestBubble(rawText = null) {
+    const bubbles = chatOutput.querySelectorAll('.chat-bubble:not(.thinking)');
+    if (bubbles.length === 0) return;
+    const latest = bubbles[bubbles.length - 1];
+    enhanceBubble(latest, rawText);
 }
 
 // Runs one chat turn: requests the assistant reply (streaming by default) and
@@ -984,6 +1755,12 @@ async function runChatTurn(text, images, fileTexts) {
         if (!res.ok || !res.body) throw new Error('Stream request failed (HTTP ' + res.status + ')');
 
         thinkingDiv.remove();
+        
+        // Supervisory tool traces container
+        const toolTracesDiv = document.createElement('div');
+        toolTracesDiv.className = 'tool-traces-container';
+        chatOutput.appendChild(toolTracesDiv);
+
         const bubble = document.createElement('div');
         bubble.className = 'chat-bubble bubble-aura';
         const statusDiv = document.createElement('div');
@@ -998,22 +1775,19 @@ async function runChatTurn(text, images, fileTexts) {
 
         const renderPartial = () => {
             if (!accumulatedText) return;
-            if (window.marked && window.DOMPurify) {
-                bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
-            } else {
-                bubble.textContent = accumulatedText;
-            }
+            bubble.innerHTML = formatAuraMarkdown(accumulatedText, true);
+            enhanceCodeBlocks(bubble);
             chatOutput.scrollTop = chatOutput.scrollHeight;
         };
-        // Throttle markdown re-rendering to ~150ms during streaming.
+        // Throttle markdown re-rendering to ~120ms during streaming.
         const scheduleRender = () => {
             const now = Date.now();
             const elapsed = now - lastRender;
-            if (elapsed >= 150) {
+            if (elapsed >= 120) {
                 lastRender = now;
                 renderPartial();
             } else if (!renderTimer) {
-                renderTimer = setTimeout(() => { renderTimer = null; scheduleRender(); }, 150 - elapsed);
+                renderTimer = setTimeout(() => { renderTimer = null; scheduleRender(); }, 120 - elapsed);
             }
         };
 
@@ -1038,12 +1812,40 @@ async function runChatTurn(text, images, fileTexts) {
                     scheduleRender();
                 } else if (ev.type === 'tool_start') {
                     statusDiv.textContent = 'Running ' + ev.tool + '\u2026';
+                    let chip = toolTracesDiv.querySelector(`[data-tool="${ev.tool}"]`);
+                    if (!chip) {
+                        chip = document.createElement('div');
+                        chip.setAttribute('data-tool', ev.tool);
+                        toolTracesDiv.appendChild(chip);
+                    }
+                    chip.className = 'tool-chip running';
+                    chip.innerHTML = `<span class="tool-spinner"></span><span class="tool-name">⚡ ${escapeHtml(ev.tool)}</span><span class="tool-status">RUNNING...</span>`;
+                    audioSys?.playBeep(720, 0.03);
                 } else if (ev.type === 'tool_result') {
                     statusDiv.textContent = ev.tool + ' done.';
+                    let chip = toolTracesDiv.querySelector(`[data-tool="${ev.tool}"]`);
+                    if (!chip) {
+                        chip = document.createElement('div');
+                        chip.setAttribute('data-tool', ev.tool);
+                        toolTracesDiv.appendChild(chip);
+                    }
+                    chip.className = 'tool-chip success';
+                    chip.innerHTML = `<span class="tool-icon">✓</span><span class="tool-name">⚡ ${escapeHtml(ev.tool)}</span><span class="tool-status">DONE</span>`;
+                    audioSys?.playSuccess();
                 } else if (ev.type === 'permission_request') {
                     statusDiv.textContent = 'Waiting for approval \u2014 ' + ev.tool + ' (' + ev.risk + '). Click AUTHORIZE in the panel or reply Yes.';
+                    let chip = toolTracesDiv.querySelector(`[data-tool="${ev.tool}"]`);
+                    if (!chip) {
+                        chip = document.createElement('div');
+                        chip.setAttribute('data-tool', ev.tool);
+                        toolTracesDiv.appendChild(chip);
+                    }
+                    chip.className = 'tool-chip pending-auth';
+                    chip.innerHTML = `<span class="tool-icon">⚠</span><span class="tool-name">⚡ ${escapeHtml(ev.tool)} (${escapeHtml(ev.risk)})</span><span class="tool-status">APPROVAL NEEDED</span>`;
+                    audioSys?.playError();
+                    renderHitlPermissionCard(ev);
                 } else if (ev.type === 'meta') {
-                    // Intent info; no UI change needed yet.
+                    // Intent info
                 } else if (ev.type === 'done') {
                     accumulatedText = (typeof ev.text === 'string') ? ev.text : accumulatedText;
                 } else if (ev.type === 'error') {
@@ -1053,18 +1855,10 @@ async function runChatTurn(text, images, fileTexts) {
         }
         if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
 
-        // Final render with syntax highlighting.
+        // Final render with syntax highlighting and action toolbar
         if (accumulatedText) {
-            if (window.marked && window.DOMPurify) {
-                bubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
-                if (window.hljs) {
-                    bubble.querySelectorAll('pre code').forEach((block) => {
-                        hljs.highlightElement(block);
-                    });
-                }
-            } else {
-                bubble.textContent = accumulatedText;
-            }
+            bubble.innerHTML = formatAuraMarkdown(accumulatedText, false);
+            enhanceBubble(bubble, accumulatedText);
         }
         statusDiv.textContent = streamError ? ('Error: ' + streamError) : '';
         setTimeout(() => statusDiv.remove(), streamError ? 10000 : 2000);
@@ -1075,8 +1869,6 @@ async function runChatTurn(text, images, fileTexts) {
         if (streamError) throw new Error(streamError);
 
         if (accumulatedText) {
-            enhanceLatestBubble(accumulatedText);
-
             const termDiv = document.createElement('div');
             termDiv.className = 'aura-msg';
             termDiv.textContent = accumulatedText;
@@ -1106,21 +1898,10 @@ async function runChatTurn(text, images, fileTexts) {
         if (accumulatedText) {
             const currentBubble = document.createElement('div');
             currentBubble.className = 'chat-bubble bubble-aura';
+            currentBubble.innerHTML = formatAuraMarkdown(accumulatedText, false);
             chatOutput.appendChild(currentBubble);
-
-            if (window.marked && window.DOMPurify) {
-                currentBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
-                if (window.hljs) {
-                    currentBubble.querySelectorAll('pre code').forEach((block) => {
-                        hljs.highlightElement(block);
-                    });
-                }
-            } else {
-                currentBubble.textContent = accumulatedText;
-            }
+            enhanceBubble(currentBubble, accumulatedText);
             chatOutput.scrollTop = chatOutput.scrollHeight;
-
-            enhanceLatestBubble(accumulatedText);
 
             const termDiv = document.createElement('div');
             termDiv.className = 'aura-msg';
@@ -1212,6 +1993,7 @@ async function startVoiceInteraction() {
         updateConversationIndicator(window.auraState);
         clearTtsQueue();
         triggerBargeInRipple();
+        setVoiceOverlayStatus('INTERRUPTED // LISTENING...', '"Say your command..."', 'interrupted');
         api('/api/voice/stop', { method: 'POST' }).catch(() => {});
         currentAudio.pause();
         currentAudio.dispatchEvent(new Event('ended')); // route through onended cleanup
@@ -1231,6 +2013,7 @@ async function beginListen() {
 
     if (window.auraState === 'listening') return;
     setAuraState('listening');
+    setVoiceOverlayStatus('AURA LISTENING...', '"Listening for your command..."');
     commandInput.disabled = true;
     voiceBtn.setAttribute('aria-pressed', 'true');
     startMicAnim();
@@ -1250,6 +2033,7 @@ async function beginListen() {
         commandInput.disabled = false;
 
         if (data.status === 'success' && data.transcription) {
+            setVoiceOverlayStatus('PROCESSING...', `"${data.transcription}"`);
             await appendToTerminal(data.transcription, 'user');
             // The reply is fetched and streamed separately so a slow local model
             // never delays appearance of the user's own words.
@@ -1257,6 +2041,8 @@ async function beginListen() {
             let reply = '';
             try {
                 reply = (await runChatTurn(data.transcription, null, null)) || '';
+                setVoiceOverlayStatus('SPEAKING...', `"${reply.slice(0, 140)}${reply.length > 140 ? '...' : ''}"`);
+                setTimeout(() => { if (!isTtsPlaying && isVoiceOverlayOpen()) closeVoiceOverlay(); }, 4000);
             } catch (e) {
                 console.error('Voice chat error:', e);
                 const msg = ConnectionMonitor.isOffline
@@ -1465,13 +2251,19 @@ function applyTelemetry(data) {
         setDiag('uplink-fill', 'uplink-val', `${data.uplink}%`, data.uplink);
         setDiag('power-fill', 'power-val', `${data.power}%`, data.power);
 
-        // Topbar signal pill (compact 5-block meter)
-        const uplinkVal = document.getElementById('hud-signal');
-        if(uplinkVal) {
-            let sigStr = "";
-            let p = Math.round((data.uplink / 100) * 5);
-            for(let i=0; i<5; i++) sigStr += (i<p) ? "█" : "░";
-            uplinkVal.textContent = sigStr + ` ${data.uplink}%`;
+        // Topbar signal pill (tactical 4-bar meter + percentage)
+        const uplinkEl = document.getElementById('hud-signal');
+        const uplinkText = document.getElementById('hud-signal-text');
+        if (uplinkEl && uplinkText) {
+            uplinkText.textContent = `${data.uplink}%`;
+            const bars = uplinkEl.querySelectorAll('.signal-bar');
+            const activeCount = Math.round((data.uplink / 100) * bars.length);
+            bars.forEach((bar, idx) => {
+                if (idx < activeCount) bar.classList.add('active');
+                else bar.classList.remove('active');
+            });
+        } else if (uplinkEl) {
+            uplinkEl.textContent = `${data.uplink}%`;
         }
 
         // Thermals: backend sends null when a sensor is unavailable
@@ -1482,13 +2274,25 @@ function applyTelemetry(data) {
         } else {
             const v = document.getElementById('cpu-temp-val');
             if (v) v.textContent = 'N/A';
+            const f = document.getElementById('cpu-temp-fill');
+            if (f) f.style.width = '0%';
         }
 
-        if(data.cpu_fan != null) {
-            setDiag('cpu-fan-fill', 'cpu-fan-val', `${data.cpu_fan} RPM`, (data.cpu_fan / 5000) * 100);
+        if(data.cpu_fan != null && data.cpu_fan !== 'N/A') {
+            if (data.cpu_fan === 'AUTO') {
+                const v = document.getElementById('cpu-fan-val');
+                if (v) v.textContent = 'AUTO';
+                const f = document.getElementById('cpu-fan-fill');
+                if (f) f.style.width = '35%';
+            } else {
+                const rpm = parseInt(data.cpu_fan);
+                setDiag('cpu-fan-fill', 'cpu-fan-val', `${data.cpu_fan} RPM`, isNaN(rpm) ? 35 : (rpm / 5000) * 100);
+            }
         } else {
             const v = document.getElementById('cpu-fan-val');
-            if (v) v.textContent = 'N/A';
+            if (v) v.textContent = 'AUTO';
+            const f = document.getElementById('cpu-fan-fill');
+            if (f) f.style.width = '35%';
         }
 
         if(data.gpu_temp != null) {
@@ -1498,9 +2302,11 @@ function applyTelemetry(data) {
         } else {
             const v = document.getElementById('gpu-temp-val');
             if (v) v.textContent = 'N/A';
+            const f = document.getElementById('gpu-temp-fill');
+            if (f) f.style.width = '0%';
         }
 
-        if(data.gpu_mem !== undefined) {
+        if(data.gpu_mem !== undefined && data.gpu_mem !== null) {
             const v = document.getElementById('gpu-mem-val');
             if (v) v.textContent = data.gpu_mem;
             let memParts = String(data.gpu_mem).split('/');
@@ -1508,14 +2314,41 @@ function applyTelemetry(data) {
                 let used = parseInt(memParts[0]);
                 let total = parseInt(memParts[1]);
                 if(!isNaN(used) && !isNaN(total) && total > 0) {
-                    setDiag('gpu-mem-fill', 'gpu-mem-val', data.gpu_mem, (used/total)*100);
+                    // Provide a subtle 3% minimum baseline when memory is 0 MB used so the gauge remains visually responsive
+                    const pct = Math.max(used > 0 ? (used / total) * 100 : 3, 3);
+                    setDiag('gpu-mem-fill', 'gpu-mem-val', data.gpu_mem, pct);
+                } else {
+                    const f = document.getElementById('gpu-mem-fill');
+                    if (f) f.style.width = '0%';
                 }
+            } else {
+                const f = document.getElementById('gpu-mem-fill');
+                if (f) f.style.width = '0%';
             }
+        } else {
+            const v = document.getElementById('gpu-mem-val');
+            if (v) v.textContent = 'N/A';
+            const f = document.getElementById('gpu-mem-fill');
+            if (f) f.style.width = '0%';
         }
 
-        if(data.gpu_fan !== undefined) {
+        if(data.gpu_fan !== undefined && data.gpu_fan !== 'N/A') {
             const v = document.getElementById('gpu-fan-val');
             if (v) v.textContent = data.gpu_fan;
+            const f = document.getElementById('gpu-fan-fill');
+            if (f) {
+                if (data.gpu_fan === 'AUTO') {
+                    f.style.width = '35%';
+                } else {
+                    const num = parseInt(data.gpu_fan);
+                    f.style.width = isNaN(num) ? '35%' : `${num}%`;
+                }
+            }
+        } else {
+            const v = document.getElementById('gpu-fan-val');
+            if (v) v.textContent = 'AUTO';
+            const f = document.getElementById('gpu-fan-fill');
+            if (f) f.style.width = '35%';
         }
 
         // Chart Data
@@ -1546,9 +2379,95 @@ function applyTelemetry(data) {
                 if (toolsVal) toolsVal.textContent = `${(t.tool_latency || 0).toFixed(1)}s`;
             }
         }
+
+        if (data.ambient) {
+            applyAmbient(data.ambient);
+        }
     } catch (error) {
         console.warn("Telemetry render failed:", error.message);
     }
+}
+
+function applyAmbient(ambient) {
+    if (!ambient) return;
+    const appEl = document.getElementById('ambient-app-text');
+    if (appEl && ambient.active_window) {
+        const appName = ambient.active_window.app_name || 'Desktop';
+        const title = ambient.active_window.title || '';
+        appEl.textContent = `Active: ${appName}`;
+        appEl.title = title ? `${appName} — "${title}"` : appName;
+    }
+
+    const clipBadge = document.getElementById('ambient-clip-badge');
+    if (clipBadge) {
+        if (ambient.clipboard && ambient.clipboard.has_content) {
+            clipBadge.style.display = 'inline-block';
+            clipBadge.textContent = `📋 ${ambient.clipboard.content_type.replace('_', ' ').toUpperCase()}`;
+            clipBadge.title = ambient.clipboard.preview || '';
+        } else {
+            clipBadge.style.display = 'none';
+        }
+    }
+
+    const suggContainer = document.getElementById('ambient-suggestions');
+    if (suggContainer) {
+        suggContainer.innerHTML = '';
+        let list = Array.isArray(ambient.suggestions) && ambient.suggestions.length > 0 ? ambient.suggestions : [];
+        if (list.length === 0) {
+            const app = (ambient.active_window?.app_name || '').toLowerCase();
+            const title = (ambient.active_window?.title || '').toLowerCase();
+            if (app.includes('code') || app.includes('studio') || app.includes('cursor') || title.includes('.py') || title.includes('.js')) {
+                list = [
+                    { title: '⚡ Explain Code', prompt: 'Review and explain the current code file I am working on.' },
+                    { title: '🧪 Write Tests', prompt: 'Write comprehensive unit tests for this active module.' },
+                    { title: '🔧 Refactor', prompt: 'Suggest clean architecture and performance refactorings.' }
+                ];
+            } else if (app.includes('terminal') || app.includes('powershell') || app.includes('cmd') || app.includes('bash')) {
+                list = [
+                    { title: '🔍 Explain Error', prompt: 'Explain the error output in my terminal and suggest a fix.' },
+                    { title: '⚡ Suggest Command', prompt: 'What command should I run next for this task?' }
+                ];
+            } else if (app.includes('chrome') || app.includes('edge') || app.includes('firefox') || app.includes('browser')) {
+                list = [
+                    { title: '📝 Summarize Page', prompt: 'Summarize the key takeaways of the web page I am viewing.' },
+                    { title: '🔎 Research Topic', prompt: 'Deep-dive and research the topic on this browser tab.' }
+                ];
+            } else if (ambient.clipboard && ambient.clipboard.has_content) {
+                list = [
+                    { title: '📋 Explain Clipboard', prompt: 'Analyze and explain the contents of my clipboard.' },
+                    { title: '⚡ Run from Clipboard', prompt: 'Execute or process the snippet currently on my clipboard.' }
+                ];
+            } else {
+                list = [
+                    { title: '🛡️ Security Scan', prompt: '/security' },
+                    { title: '📋 Autonomous Plan', prompt: '/plan ' },
+                    { title: '🌐 Search Web', prompt: '/search ' }
+                ];
+            }
+        }
+        list.forEach(s => {
+            const btn = document.createElement('button');
+            btn.className = 'ambient-pill';
+            btn.textContent = s.title;
+            btn.title = s.prompt;
+            btn.onclick = () => {
+                const cmdInput = document.getElementById('command-input');
+                if (cmdInput) {
+                    cmdInput.value = s.prompt;
+                    cmdInput.focus();
+                }
+                audioSys?.playBeep(650, 0.03);
+            };
+            suggContainer.appendChild(btn);
+        });
+    }
+}
+
+async function fetchAmbient() {
+    try {
+        const response = await api('/api/ambient', { timeout: 5000 });
+        if (response.ok) applyAmbient(await response.json());
+    } catch (_) {}
 }
 
 async function fetchTelemetry() {
@@ -1806,8 +2725,13 @@ async function saveQuickActions() {
     }
 }
 
+let _quickActionButtonsBound = false;
+
 // Bind add/save buttons when Settings view is shown
 function bindQuickActionsEditorButtons() {
+    if (_quickActionButtonsBound) return;
+    _quickActionButtonsBound = true;
+
     document.getElementById('btn-add-quick-action')?.addEventListener('click', () => {
         const container = document.getElementById('quick-actions-editor');
         if (!container) return;
@@ -1938,15 +2862,41 @@ document.querySelectorAll('.qa-btn, .sp-btn').forEach(btn => {
 
 // Lightbox logic
 const lightboxOverlay = document.getElementById('lightbox-overlay');
-document.getElementById('screen-preview-container')?.addEventListener('click', () => {
+const lightboxCloseBtn = document.getElementById('lightbox-close');
+const screenPreviewContainer = document.getElementById('screen-preview-container');
+let lastLightboxTrigger = null;
+
+function openLightbox() {
     const img = document.getElementById('screen-preview-img');
     const lightboxImg = document.getElementById('lightbox-img');
     if (img && img.style.display !== 'none' && lightboxOverlay && lightboxImg && img.src) {
+        lastLightboxTrigger = document.activeElement;
         lightboxImg.src = img.src;
         lightboxOverlay.classList.add('open');
+        lightboxCloseBtn?.focus();
+    }
+}
+
+function closeLightbox() {
+    lightboxOverlay?.classList.remove('open');
+    if (lastLightboxTrigger && typeof lastLightboxTrigger.focus === 'function') {
+        lastLightboxTrigger.focus();
+    }
+    lastLightboxTrigger = null;
+}
+
+screenPreviewContainer?.addEventListener('click', openLightbox);
+screenPreviewContainer?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openLightbox();
     }
 });
-lightboxOverlay?.addEventListener('click', () => lightboxOverlay.classList.remove('open'));
+lightboxCloseBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeLightbox();
+});
+lightboxOverlay?.addEventListener('click', closeLightbox);
 
 // ═══════════════════════════════════════════════════════════
 // SCHEDULE & REMINDERS (Chat rail)
@@ -2364,6 +3314,7 @@ async function consumeNotifications() {
                     // Suppress launching full voice session while user is actively running the wake-word test
                     return;
                 }
+                openVoiceOverlay();
                 if (wakeWordActive && canStartListening() && voiceBtn) voiceBtn.click();
                 return;
             }
@@ -2959,8 +3910,8 @@ fetchLogs();
 // THEME SWITCHER (presets only — Settings view)
 // ═══════════════════════════════════════════════════════════
 function applyPreset(preset) {
-    document.documentElement.classList.remove('theme-crimson', 'theme-emerald', 'theme-violet');
-    if (['theme-crimson', 'theme-emerald', 'theme-violet'].includes(preset)) {
+    document.documentElement.classList.remove('theme-amber', 'theme-crimson', 'theme-emerald', 'theme-violet');
+    if (['theme-amber', 'theme-crimson', 'theme-emerald', 'theme-violet'].includes(preset)) {
         document.documentElement.classList.add(preset);
     }
     try {
@@ -3079,7 +4030,7 @@ async function fetchActivePlan() {
 (function () {
     const ONBOARDED_KEY = 'aura-onboarded';
     const THEME_KEY = 'aura-theme-v2';
-    const THEMES = ['default', 'crimson', 'emerald', 'violet'];
+    const THEMES = ['default', 'amber', 'crimson', 'emerald', 'violet'];
 
     // Row definitions: id, label, checker fn, action {label, handler}
     const ROWS = [
@@ -3132,7 +4083,7 @@ async function fetchActivePlan() {
                 if (!data.model_loaded) throw new Error(data.error || 'Model not loaded');
                 return { ok: true };
             },
-            action: { label: 'Open Settings', handler: () => { closeOnboard(); switchView('settings'); } }
+            action: { label: 'Open Settings', handler: () => { closeOnboard(); showView('settings'); } }
         },
         {
             id: 'theme',
@@ -3172,7 +4123,7 @@ async function fetchActivePlan() {
     }
 
     function escapeHtml(s) {
-        return String(s).replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":"'"}[c]));
+        return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     function setRowState(id, state, result) {
@@ -3209,20 +4160,24 @@ async function fetchActivePlan() {
     }
 
     function cycleTheme() {
-        const current = localStorage.getItem(THEME_KEY) || 'default';
+        let current = 'default';
+        try {
+            const parsed = JSON.parse(localStorage.getItem(THEME_KEY) || '{}');
+            if (parsed?.preset) current = parsed.preset.replace(/^theme-/, '');
+        } catch (_) {}
         const idx = THEMES.indexOf(current);
         const next = THEMES[(idx + 1) % THEMES.length];
-        localStorage.setItem(THEME_KEY, next);
         applyTheme(next);
         setRowState('theme', 'pass', { theme: next });
     }
 
     function applyTheme(theme) {
-        document.documentElement.dataset.theme = theme;
-        // Update theme dots in Settings if visible
-        document.querySelectorAll('.theme-dot').forEach(dot => {
-            dot.classList.toggle('active', dot.dataset.theme === theme);
-        });
+        const preset = theme === 'default' ? '' : `theme-${theme}`;
+        if (typeof applyPreset === 'function') {
+            applyPreset(preset);
+        } else {
+            localStorage.setItem(THEME_KEY, JSON.stringify({ preset }));
+        }
     }
 
     function buildOverlay() {
@@ -3484,6 +4439,7 @@ function startLegacyPolling() {
 }
 
 Realtime.on('telemetry', applyTelemetry);
+Realtime.on('ambient_update', applyAmbient);
 Realtime.on('threats_update', applyThreats);
 Realtime.on('permissions_update', applyPermissions);
 Realtime.on('notifications_update', onNotificationsUpdate);
@@ -3494,15 +4450,1541 @@ Realtime.on('schedule_update', applySchedule);
 Realtime.on('processes_update', applyProcesses);
 Realtime.on('security_update', applySecurity);
 
+let voiceWaveRaf = null;
+
+function drawVoiceWave() {
+    const canvas = document.getElementById('voice-overlay-wave');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const isSpeaking = window.auraState === 'speaking' && isTtsPlaying;
+    const isListening = window.auraState === 'listening';
+    
+    // Choose active analyser: tts or mic
+    const activeAnalyser = isSpeaking ? analyser : micAnalyser;
+    const freqData = (isSpeaking ? dataArray : micDataArray);
+
+    if (activeAnalyser && freqData && freqData.length > 0) {
+        activeAnalyser.getByteFrequencyData(freqData);
+        const bars = 32;
+        const barWidth = Math.floor(w / bars) - 3;
+        const step = Math.floor(freqData.length / bars);
+
+        ctx.fillStyle = isListening ? 'rgba(0, 255, 136, 0.85)' : 'rgba(0, 240, 255, 0.85)';
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = isListening ? '#00ff88' : '#00f0ff';
+
+        for (let i = 0; i < bars; i++) {
+            const val = freqData[i * step] || 0;
+            const barHeight = Math.max(3, (val / 255) * h * 0.85);
+            const x = i * (barWidth + 3);
+            const y = (h - barHeight) / 2;
+            ctx.fillRect(x, y, barWidth, barHeight);
+        }
+    } else {
+        // Futuristic cyber resting oscillation
+        const t = performance.now() * 0.003;
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.45)';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = '#00f0ff';
+        ctx.beginPath();
+        for (let x = 0; x < w; x += 4) {
+            const u = x / w;
+            const y = (h / 2) + Math.sin(u * 14 + t) * 6 * Math.sin(u * Math.PI);
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    if (isVoiceOverlayOpen()) {
+        voiceWaveRaf = requestAnimationFrame(drawVoiceWave);
+    }
+}
+
+function startVoiceWave() {
+    if (voiceWaveRaf) cancelAnimationFrame(voiceWaveRaf);
+    voiceWaveRaf = requestAnimationFrame(drawVoiceWave);
+}
+
+function stopVoiceWave() {
+    if (voiceWaveRaf) {
+        cancelAnimationFrame(voiceWaveRaf);
+        voiceWaveRaf = null;
+    }
+}
+
+async function updateLatencyIndicator() {
+    const latEl = document.getElementById('hud-latency');
+    if (!latEl) return;
+    const t0 = performance.now();
+    try {
+        const res = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
+        if (res.ok) {
+            const ms = Math.max(1, Math.round(performance.now() - t0));
+            latEl.textContent = ms + 'ms';
+            if (ms < 50) latEl.style.color = 'var(--green)';
+            else if (ms < 150) latEl.style.color = 'var(--amber)';
+            else latEl.style.color = 'var(--red)';
+        }
+    } catch (e) {
+        latEl.textContent = 'OFFLINE';
+        latEl.style.color = 'var(--red)';
+    }
+}
+
+function isVoiceOverlayOpen() {
+    const el = document.getElementById('voice-overlay');
+    return el && el.classList.contains('active');
+}
+
+function openVoiceOverlay() {
+    const el = document.getElementById('voice-overlay');
+    if (!el) return;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add('active'));
+    setVoiceOverlayStatus('AURA LISTENING...', '"Say a command or ask a question..."');
+    startVoiceWave();
+    audioSys?.playBeep(880, 0.05);
+}
+
+function closeVoiceOverlay() {
+    const el = document.getElementById('voice-overlay');
+    if (!el) return;
+    el.classList.remove('active');
+    stopVoiceWave();
+    audioSys?.playBeep(520, 0.05);
+    setTimeout(() => {
+        if (!el.classList.contains('active')) el.hidden = true;
+    }, 300);
+}
+
+function setVoiceOverlayStatus(statusText, transcriptText, stateKey) {
+    const overlay = document.getElementById('voice-overlay');
+    const stEl = document.getElementById('voice-overlay-status');
+    const trEl = document.getElementById('voice-overlay-transcript');
+    if (stEl && statusText) stEl.textContent = statusText;
+    if (trEl && transcriptText !== undefined) trEl.textContent = transcriptText;
+
+    if (overlay && statusText) {
+        overlay.classList.remove('state-listening', 'state-processing', 'state-speaking', 'state-interrupted');
+        const sLower = statusText.toLowerCase();
+        const key = stateKey || (sLower.includes('listen') ? 'listening' :
+                                sLower.includes('process') ? 'processing' :
+                                sLower.includes('speak') ? 'speaking' :
+                                sLower.includes('interrupt') ? 'interrupted' : '');
+        if (key) overlay.classList.add(`state-${key}`);
+    }
+}
+
+function initHudCustomization() {
+    const WIDGET_MAP = {
+        'widget-toggle-media': { target: '.media-card', defaultVisible: true },
+        'widget-toggle-plan': { target: '#plan-card', defaultVisible: true },
+        'widget-toggle-schedule': { target: '.schedule-card', defaultVisible: true },
+        'widget-toggle-ambient': { target: '#ambient-bar', defaultVisible: true }
+    };
+
+    let visibility = {};
+    try {
+        visibility = JSON.parse(localStorage.getItem('aura_widget_visibility') || '{}');
+    } catch (_) {}
+
+    Object.keys(WIDGET_MAP).forEach(id => {
+        const toggle = document.getElementById(id);
+        const config = WIDGET_MAP[id];
+        const el = document.querySelector(config.target);
+        if (!toggle || !el) return;
+
+        const isVisible = visibility[id] !== undefined ? visibility[id] : config.defaultVisible;
+        toggle.checked = isVisible;
+        el.classList.toggle('hud-widget-hidden', !isVisible);
+
+        toggle.addEventListener('change', () => {
+            const nowVisible = toggle.checked;
+            el.classList.toggle('hud-widget-hidden', !nowVisible);
+            visibility[id] = nowVisible;
+            try {
+                localStorage.setItem('aura_widget_visibility', JSON.stringify(visibility));
+            } catch (_) {}
+            audioSys?.playBeep(nowVisible ? 800 : 400, 0.03);
+        });
+    });
+}
+
+function initVoiceSettings() {
+    const select = document.getElementById('tts-voice-select');
+    const slider = document.getElementById('tts-rate-slider');
+    const rateVal = document.getElementById('tts-rate-val');
+    const previewBtn = document.getElementById('btn-preview-voice');
+
+    const savedRate = localStorage.getItem('aura_tts_rate') || '+0%';
+
+    if (slider && rateVal) {
+        const rateInt = parseInt(savedRate.replace('%', '').replace('+', '')) || 0;
+        slider.value = rateInt;
+        rateVal.textContent = rateInt === 0 ? 'Normal (+0%)' : `${rateInt > 0 ? '+' : ''}${rateInt}%`;
+
+        slider.addEventListener('input', () => {
+            const v = parseInt(slider.value) || 0;
+            const formatted = `${v >= 0 ? '+' : ''}${v}%`;
+            rateVal.textContent = v === 0 ? 'Normal (+0%)' : formatted;
+            localStorage.setItem('aura_tts_rate', formatted);
+        });
+    }
+
+    if (previewBtn) {
+        previewBtn.addEventListener('click', async () => {
+            const v = select ? select.value : 'en-US-AvaNeural';
+            const r = slider ? `${parseInt(slider.value) >= 0 ? '+' : ''}${parseInt(slider.value)}%` : '+0%';
+            const b = (document.getElementById('env-tts-backend')?.value || 'edge').toLowerCase();
+            previewBtn.disabled = true;
+            previewBtn.textContent = 'SYNTHESIZING...';
+            try {
+                const sampleText = "Hello! I am Aura. My neural speech engine is now calibrated to sound natural, warm, and human.";
+                const res = await api(`/api/tts?text=${encodeURIComponent(sampleText)}&voice=${encodeURIComponent(v)}&rate=${encodeURIComponent(r)}&backend=${encodeURIComponent(b)}`);
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const audioUrl = URL.createObjectURL(blob);
+                    const audio = new Audio(audioUrl);
+                    const cleanup = () => URL.revokeObjectURL(audioUrl);
+                    audio.addEventListener('ended', cleanup, { once: true });
+                    audio.addEventListener('error', cleanup, { once: true });
+                    await audio.play();
+                } else {
+                    showToast('VOICE ENGINE', 'Failed to synthesize voice preview.', 'error');
+                }
+            } catch (e) {
+                console.error('Preview voice error:', e);
+                showToast('VOICE ENGINE', 'Voice preview failed.', 'error');
+            } finally {
+                previewBtn.disabled = false;
+                previewBtn.textContent = '▶ PREVIEW VOICE';
+            }
+        });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ENVIRONMENT (.ENV) CONFIGURATION MANAGER
+// ═══════════════════════════════════════════════════════════
+let cachedEnvVars = {};
+let cachedEnvSchema = {};
+let cachedEnvOptions = {};
+let _pendingVoiceByBackend = { edge: null, kokoro: null };
+let _ttsBackendUserTouched = false;
+
+const DEFAULT_EDGE_VOICES = [
+    { id: 'en-US-AvaNeural', name: 'Ava (Ultra-Realistic Conversational Female)' },
+    { id: 'en-US-AndrewNeural', name: 'Andrew (Warm Natural Conversational Male)' },
+    { id: 'en-US-EmmaNeural', name: 'Emma (Expressive Natural Female)' },
+    { id: 'en-US-JennyNeural', name: 'Jenny (Warm & Friendly Female)' },
+    { id: 'en-US-BrianNeural', name: 'Brian (Deep Articulate Male)' },
+    { id: 'en-US-GuyNeural', name: 'Guy (Casual American Male)' },
+    { id: 'en-GB-SoniaNeural', name: 'Sonia (Sophisticated British Female - Jarvis/Friday)' },
+    { id: 'en-GB-RyanNeural', name: 'Ryan (Intellectual British Male)' },
+    { id: 'en-US-AriaNeural', name: 'Aria (Classic Tactical Assistant)' },
+    { id: 'en-IN-NeerjaNeural', name: 'Neerja (Natural Indian English Female)' },
+    { id: 'en-IN-PrabhatNeural', name: 'Prabhat (Natural Indian English Male)' }
+];
+
+const DEFAULT_KOKORO_VOICES = [
+    { id: 'af', name: 'af (American Female - Flagship Default)' },
+    { id: 'af_bella', name: 'af_bella (American Female - Warm Expressive)' },
+    { id: 'af_nicole', name: 'af_nicole (American Female - Soft Whispery)' },
+    { id: 'af_sarah', name: 'af_sarah (American Female - Clear Professional)' },
+    { id: 'af_sky', name: 'af_sky (American Female - Bright Casual)' },
+    { id: 'am_adam', name: 'am_adam (American Male - Steady Narrator)' },
+    { id: 'am_michael', name: 'am_michael (American Male - Deep Broadcast)' },
+    { id: 'bf_emma', name: 'bf_emma (British Female - Clear)' },
+    { id: 'bf_isabella', name: 'bf_isabella (British Female - Refined)' },
+    { id: 'bm_george', name: 'bm_george (British Male - Warm)' },
+    { id: 'bm_lewis', name: 'bm_lewis (British Male - Articulate)' }
+];
+
+const CLOUD_PROVIDER_DEFAULTS = {
+    groq: { keyEnv: 'GROQ_API_KEY', modelEnv: 'GROQ_MODEL', defaultModel: 'llama-3.3-70b-versatile', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'meta-llama/llama-4-scout-17b-16e-instruct', 'qwen/qwen3-32b', 'openai/gpt-oss-120b'] },
+    nvidia: { keyEnv: 'NVIDIA_API_KEY', modelEnv: 'NVIDIA_MODEL', defaultModel: 'meta/llama-3.3-70b-instruct', models: ['meta/llama-3.3-70b-instruct', 'nvidia/llama-3.1-nemotron-ultra-253b-v1', 'qwen/qwen2.5-72b-instruct', 'deepseek-ai/deepseek-r1', 'mistralai/mistral-large-2-instruct'] },
+    gemini: { keyEnv: 'GEMINI_API_KEY', modelEnv: 'GEMINI_MODEL', defaultModel: 'gemini-2.5-flash', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'] },
+    openai: { keyEnv: 'OPENAI_API_KEY', modelEnv: 'OPENAI_MODEL', defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1', 'o4-mini'] },
+    openrouter: { keyEnv: 'OPENROUTER_API_KEY', modelEnv: 'OPENROUTER_MODEL', defaultModel: 'openai/gpt-4o-mini', models: ['openai/gpt-4o-mini', 'anthropic/claude-sonnet-4', 'google/gemini-2.5-flash', 'deepseek/deepseek-chat-v3-0324:free', 'meta-llama/llama-3.3-70b-instruct:free', 'openrouter/auto'] }
+};
+
+let liveProviderModels = (() => {
+    try {
+        const raw = localStorage.getItem('aura_live_models_cache');
+        const parsed = raw ? JSON.parse(raw) : {};
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+})();
+const _providerFetchSeq = {};
+const _providerLastKey = {};
+const _providerAutoFetched = {};
+const _providerDebounceTimers = {};
+
+function saveLiveProviderModels(prov, models) {
+    if (!prov || !Array.isArray(models) || models.length === 0) return;
+    liveProviderModels[prov] = models;
+    try {
+        localStorage.setItem('aura_live_models_cache', JSON.stringify(liveProviderModels));
+    } catch (_) { /* ignore storage quota errors */ }
+}
+
+function getCloudModelOptions(prov, searchQuery = '') {
+    const spec = CLOUD_PROVIDER_DEFAULTS[prov];
+    if (!spec) return [];
+    const live = liveProviderModels[prov];
+    const baseList = (Array.isArray(live) && live.length > 0)
+        ? live
+        : (cachedEnvSchema[spec.modelEnv]?.options?.map(o => o.value) || spec.models);
+    const q = String(searchQuery || '').trim().toLowerCase();
+    const filtered = q ? baseList.filter(m => String(m).toLowerCase().includes(q)) : baseList;
+    return filtered.map(m => ({ value: m, label: m }));
+}
+
+function refreshCloudModelSelect(prov, preferredModel) {
+    const spec = CLOUD_PROVIDER_DEFAULTS[prov];
+    const modelSelect = document.getElementById(`env-${prov}-model`);
+    const modelCustom = document.getElementById(`env-${prov}-model-custom`);
+    const searchInput = document.getElementById(`env-${prov}-model-search`);
+    if (!spec || !modelSelect) return;
+
+    const currentUiVal = modelSelect.value === '__custom__'
+        ? (modelCustom?.value.trim() || '')
+        : modelSelect.value;
+    const curM = preferredModel !== undefined
+        ? preferredModel
+        : (currentUiVal || cachedEnvVars[spec.modelEnv] || spec.defaultModel);
+
+    const opts = getCloudModelOptions(prov, searchInput ? searchInput.value : '');
+    if (opts.length === 0 && searchInput && searchInput.value.trim()) {
+        populateSelectOptions(modelSelect, [{ value: curM, label: `No matches (${curM})` }], curM, true);
+    } else {
+        populateSelectOptions(modelSelect, opts, curM, true);
+    }
+    if (modelCustom) {
+        const isCustom = modelSelect.value === '__custom__';
+        modelCustom.style.display = isCustom ? 'block' : 'none';
+        modelCustom.value = isCustom ? curM : '';
+    }
+    if (searchInput && Array.isArray(liveProviderModels[prov]) && liveProviderModels[prov].length > 0) {
+        searchInput.placeholder = `Search ${liveProviderModels[prov].length} live models...`;
+    }
+}
+
+async function fetchLiveModelsForProvider(prov, { silent = false } = {}) {
+    const spec = CLOUD_PROVIDER_DEFAULTS[prov];
+    if (!spec) return { ok: false };
+    const keyInput = document.getElementById(`env-${prov}-api-key`);
+    const statusPill = document.getElementById(`provider-status-${prov}`);
+    const testBtn = document.querySelector(`.btn-test-provider[data-provider="${prov}"]`);
+    const keyVal = keyInput ? keyInput.value.trim() : '';
+
+    if (!keyVal) {
+        if (statusPill) {
+            statusPill.textContent = 'KEY OPTIONAL';
+            statusPill.classList.remove('configured', 'error');
+        }
+        return { ok: false };
+    }
+
+    const seq = (_providerFetchSeq[prov] || 0) + 1;
+    _providerFetchSeq[prov] = seq;
+    _providerLastKey[prov] = keyVal;
+
+    if (statusPill) {
+        statusPill.textContent = 'SEARCHING...';
+        statusPill.classList.remove('configured', 'error');
+    }
+    if (testBtn) {
+        testBtn.disabled = true;
+        testBtn.textContent = '...';
+    }
+
+    try {
+        const res = await api('/api/settings/provider/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: prov, api_key: keyVal })
+        });
+        const data = await res.json();
+        if (_providerFetchSeq[prov] !== seq) return data;
+
+        if (data.ok && Array.isArray(data.models) && data.models.length > 0) {
+            saveLiveProviderModels(prov, data.models);
+            if (cachedEnvSchema[spec.modelEnv]) {
+                cachedEnvSchema[spec.modelEnv].options = data.models.map(m => ({ value: m, label: m }));
+            }
+            if (statusPill) {
+                statusPill.textContent = `LIVE (${data.count})`;
+                statusPill.classList.remove('error');
+                statusPill.classList.add('configured');
+            }
+            refreshCloudModelSelect(prov);
+            const filterEl = document.getElementById('env-filter-input');
+            if (document.getElementById('env-table-body')) {
+                renderEnvTable(filterEl ? filterEl.value.trim() : '');
+            }
+            if (!silent) {
+                showToast('CLOUD API', `${prov.toUpperCase()} verified (${data.count} live models)`, 'success');
+                audioSys?.playSuccess();
+            }
+        } else {
+            if (statusPill) {
+                statusPill.textContent = data.ok ? 'NO MODELS' : 'INVALID KEY';
+                statusPill.classList.remove('configured');
+                statusPill.classList.add('error');
+            }
+            if (!silent) {
+                showToast('CLOUD API', data.error || `${prov.toUpperCase()} check failed`, 'error');
+            }
+        }
+        return data;
+    } catch (err) {
+        if (_providerFetchSeq[prov] === seq && statusPill) {
+            statusPill.textContent = 'ERROR';
+            statusPill.classList.remove('configured');
+            statusPill.classList.add('error');
+        }
+        if (!silent) {
+            showToast('CLOUD API', `Failed to test ${prov.toUpperCase()}`, 'error');
+        }
+        return { ok: false };
+    } finally {
+        if (testBtn) {
+            testBtn.disabled = false;
+            testBtn.textContent = 'TEST';
+        }
+    }
+}
+
+const FALLBACK_ENV_SCHEMA = {
+    AURA_LLM_PROVIDER: { category: 'ai', description: 'Active reasoning provider (Ollama local or Cloud API)', type: 'select', options: [
+        { value: 'ollama', label: 'ollama (Local Ollama)' }, { value: 'groq', label: 'groq (Groq Cloud)' },
+        { value: 'nvidia', label: 'nvidia (NVIDIA NIM)' }, { value: 'gemini', label: 'gemini (Google Gemini)' },
+        { value: 'openai', label: 'openai (OpenAI / ChatGPT)' }, { value: 'openrouter', label: 'openrouter (OpenRouter)' }
+    ]},
+    GROQ_API_KEY: { category: 'ai', description: 'Custom API key for Groq Cloud', type: 'password', options: [] },
+    GROQ_MODEL: { category: 'ai', description: 'Default Groq Cloud model ID', type: 'select_or_custom', options: CLOUD_PROVIDER_DEFAULTS.groq.models.map(m => ({ value: m, label: m })) },
+    NVIDIA_API_KEY: { category: 'ai', description: 'Custom API key for NVIDIA NIM', type: 'password', options: [] },
+    NVIDIA_MODEL: { category: 'ai', description: 'Default NVIDIA NIM model ID', type: 'select_or_custom', options: CLOUD_PROVIDER_DEFAULTS.nvidia.models.map(m => ({ value: m, label: m })) },
+    GEMINI_API_KEY: { category: 'ai', description: 'Custom API key for Google Gemini', type: 'password', options: [] },
+    GEMINI_MODEL: { category: 'ai', description: 'Default Google Gemini model ID', type: 'select_or_custom', options: CLOUD_PROVIDER_DEFAULTS.gemini.models.map(m => ({ value: m, label: m })) },
+    OPENAI_API_KEY: { category: 'ai', description: 'Custom API key for OpenAI / ChatGPT', type: 'password', options: [] },
+    OPENAI_MODEL: { category: 'ai', description: 'Default OpenAI / ChatGPT model ID', type: 'select_or_custom', options: CLOUD_PROVIDER_DEFAULTS.openai.models.map(m => ({ value: m, label: m })) },
+    OPENROUTER_API_KEY: { category: 'ai', description: 'Custom API key for OpenRouter', type: 'password', options: [] },
+    OPENROUTER_MODEL: { category: 'ai', description: 'Default OpenRouter model ID', type: 'select_or_custom', options: CLOUD_PROVIDER_DEFAULTS.openrouter.models.map(m => ({ value: m, label: m })) },
+    OLLAMA_MODEL: { category: 'ai', description: 'Primary reasoning LLM (must be pulled in Ollama)', type: 'select_or_custom', options: [{ value: 'gemma4:e2b', label: 'gemma4:e2b' }] },
+    OLLAMA_VISION_MODEL: { category: 'ai', description: 'Dedicated vision-language model for screenshots & images', type: 'select_or_custom', options: [{ value: 'qwen3-vl:4b', label: 'qwen3-vl:4b' }] },
+    OLLAMA_NUM_CTX: { category: 'ai', description: 'Context window size in tokens', type: 'select_or_custom', options: [
+        { value: '2048', label: '2,048 tokens (Low VRAM)' }, { value: '4096', label: '4,096 tokens' },
+        { value: '8192', label: '8,192 tokens (Default)' }, { value: '16384', label: '16,384 tokens' },
+        { value: '32768', label: '32,768 tokens' }, { value: '65536', label: '65,536 tokens' }, { value: '131072', label: '131,072 tokens' }
+    ]},
+    OLLAMA_KEEP_ALIVE: { category: 'ai', description: 'How long Ollama keeps models loaded in RAM/VRAM', type: 'select_or_custom', options: [
+        { value: '0', label: '0 (Unload immediately)' }, { value: '2m', label: '2m' }, { value: '5m', label: '5m (Default)' },
+        { value: '10m', label: '10m' }, { value: '30m', label: '30m' }, { value: '1h', label: '1h' }, { value: '-1', label: '-1 (Keep forever)' }
+    ]},
+    AURA_INTENT_ROUTER: { category: 'ai', description: 'Pre-classify intent before main agent pass', type: 'select', options: [
+        { value: 'on', label: 'on (Fast intent pre-routing)' }, { value: 'off', label: 'off (Direct full toolset)' }
+    ]},
+    AURA_TTS_BACKEND: { category: 'audio', description: 'Text-to-Speech synthesis engine', type: 'select', options: [
+        { value: 'edge', label: 'edge (Microsoft Cloud Neural)' }, { value: 'kokoro', label: 'kokoro (100% Offline ONNX Neural)' }
+    ]},
+    AURA_TTS_VOICE: { category: 'audio', description: 'Voice model ID (Edge Neural or Kokoro local)', type: 'select_or_custom', options: [
+        ...DEFAULT_EDGE_VOICES.map(v => ({ value: v.id, label: `Edge: ${v.name}` })),
+        ...DEFAULT_KOKORO_VOICES.map(v => ({ value: v.id, label: `Kokoro: ${v.name}` }))
+    ]},
+    AURA_TTS_RATE: { category: 'audio', description: 'Speech rate adjustment', type: 'select_or_custom', options: [
+        '-20%', '-15%', '-10%', '-5%', '+0%', '+5%', '+10%', '+15%', '+20%'
+    ].map(r => ({ value: r, label: r === '+0%' ? '+0% (Normal)' : r })) },
+    AURA_STT_BACKEND: { category: 'audio', description: 'Speech-to-Text engine', type: 'select', options: [
+        { value: 'local', label: 'local (faster-whisper offline)' }, { value: 'cloud', label: 'cloud (Google SpeechRecognition)' }
+    ]},
+    AURA_STT_MODEL: { category: 'audio', description: 'faster-whisper model checkpoint size', type: 'select_or_custom', options: [
+        { value: 'tiny.en', label: 'tiny.en (~39M, Fastest English)' }, { value: 'tiny', label: 'tiny (~39M, Multilingual)' },
+        { value: 'base.en', label: 'base.en (~74M, Balanced English)' }, { value: 'base', label: 'base (~74M, Multilingual)' },
+        { value: 'small.en', label: 'small.en (~244M, Accurate English)' }, { value: 'small', label: 'small (~244M, Multilingual)' },
+        { value: 'medium.en', label: 'medium.en (~769M, High Accuracy)' }, { value: 'medium', label: 'medium (~769M, Multilingual)' },
+        { value: 'large-v3', label: 'large-v3 (~1.55B, Maximum)' }, { value: 'turbo', label: 'turbo (~809M, Fast Accurate)' }
+    ]},
+    AURA_STT_DEVICE: { category: 'audio', description: 'Hardware device for Whisper inference', type: 'select', options: [
+        { value: 'auto', label: 'auto (CUDA / CPU)' }, { value: 'cuda', label: 'cuda (NVIDIA GPU)' }, { value: 'cpu', label: 'cpu (Host CPU)' }
+    ]},
+    AURA_STT_COMPUTE_TYPE: { category: 'audio', description: 'CTranslate2 precision / quantization', type: 'select', options: [
+        { value: 'auto', label: 'auto' }, { value: 'default', label: 'default' }, { value: 'int8', label: 'int8' },
+        { value: 'float16', label: 'float16' }, { value: 'int8_float16', label: 'int8_float16' }, { value: 'float32', label: 'float32' }
+    ]},
+    AURA_WAKEWORD_MODEL: { category: 'audio', description: 'ONNX/TFLite wake word model path', type: 'select_or_custom', options: [
+        { value: 'models/hey_aura.onnx', label: 'models/hey_aura.onnx' }
+    ]},
+    AURA_WAKEWORD_THRESHOLD: { category: 'audio', description: 'Wake word detection confidence cutoff', type: 'select_or_custom', options: [
+        '0.30', '0.35', '0.40', '0.45', '0.50', '0.55', '0.60', '0.65', '0.70', '0.75', '0.80', '0.85', '0.90', '0.95'
+    ].map(v => ({ value: v, label: v })) },
+    AURA_WAKEWORD_SPEAKING_THRESHOLD: { category: 'audio', description: 'Higher threshold while AURA speaks (barge-in guard)', type: 'select_or_custom', options: [
+        '0.50', '0.55', '0.60', '0.65', '0.70', '0.75', '0.80', '0.85', '0.90', '0.95'
+    ].map(v => ({ value: v, label: v })) },
+    AURA_WAKEWORD_COOLDOWN: { category: 'audio', description: 'Seconds to suppress repeat wake detections', type: 'select_or_custom', options: [
+        '0.5', '1.0', '1.5', '2.0', '3.0', '3.5', '5.0'
+    ].map(v => ({ value: v, label: `${v}s` })) },
+    AURA_WAKEWORD_PERSISTENCE: { category: 'audio', description: 'Consecutive 80ms chunks required above threshold', type: 'select_or_custom', options: [
+        '1', '2', '3', '4', '5', '6', '8'
+    ].map(v => ({ value: v, label: `${v} chunks` })) },
+    AURA_WAKEWORD_VAD_THRESHOLD: { category: 'audio', description: 'Audio RMS energy cutoff to skip silence', type: 'select_or_custom', options: [
+        '0.0', '10.0', '15.0', '20.0', '30.0', '50.0', '100.0'
+    ].map(v => ({ value: v, label: v })) },
+    AURA_WAKEWORD_DEVICE: { category: 'audio', description: 'Microphone input device index or name', type: 'select_or_custom', options: [
+        { value: '', label: 'System Default Microphone' }
+    ]},
+    AURA_WAKEWORD_ONE_SHOT: { category: 'audio', description: 'Stream pre-roll utterance right after wake word', type: 'select', options: [
+        { value: 'true', label: 'true (Stream immediately)' }, { value: 'false', label: 'false (Wait for pause)' }
+    ]},
+    AURA_SPEAKER_VERIFICATION: { category: 'audio', description: 'Verify enrolled speaker voiceprint on wake word', type: 'select', options: [
+        { value: 'false', label: 'false (Allow any speaker)' }, { value: 'true', label: 'true (Enforce voiceprint gate)' }
+    ]},
+    AURA_VISUAL_TASK_TIMEOUT: { category: 'env', description: 'Time budget in seconds for visual desktop agent', type: 'select_or_custom', options: [
+        '30', '60', '90', '120', '180', '240', '300'
+    ].map(v => ({ value: v, label: `${v}s` })) },
+    AURA_WIZ_BROADCAST: { category: 'env', description: 'WiZ smart-bulb UDP discovery broadcast address', type: 'select_or_custom', options: [
+        { value: '255.255.255.255', label: '255.255.255.255 (Global Broadcast)' }
+    ]},
+    AURA_SSE_HEARTBEAT: { category: 'env', description: 'Server-Sent Events keep-alive ping interval (seconds)', type: 'select_or_custom', options: [
+        '5', '10', '15', '20', '30', '60'
+    ].map(v => ({ value: v, label: `${v}s` })) }
+};
+
+function populateSelectOptions(selectEl, options, currentVal, extraCustomOption = false) {
+    if (!selectEl) return;
+    const valStr = currentVal === undefined || currentVal === null ? '' : String(currentVal);
+    const opts = Array.isArray(options) ? options.slice() : [];
+    const hasExact = opts.some(o => String(o.value) === valStr);
+
+    if (valStr !== '' && !hasExact && !extraCustomOption) {
+        opts.unshift({ value: valStr, label: `${valStr} (Current)` });
+    }
+
+    let html = opts.map(o => {
+        const v = String(o.value);
+        const sel = v === valStr ? 'selected' : '';
+        return `<option value="${escapeHtml(v)}" ${sel}>${escapeHtml(o.label || v)}</option>`;
+    }).join('');
+
+    if (extraCustomOption) {
+        const useCustom = valStr !== '' && !hasExact;
+        html += `<option value="__custom__" ${useCustom ? 'selected' : ''}>Custom value...</option>`;
+    }
+
+    selectEl.innerHTML = html;
+    if (extraCustomOption) {
+        selectEl.value = (valStr !== '' && !hasExact) ? '__custom__' : valStr;
+    } else if (hasExact || valStr !== '') {
+        selectEl.value = valStr;
+    }
+}
+
+function getVoiceOptionsForBackend(backend) {
+    const norm = String(backend || 'edge').toLowerCase();
+    const voicesByBackend = cachedEnvOptions?.tts_voices || {};
+    const rawEdge = (Array.isArray(voicesByBackend.edge) && voicesByBackend.edge.length)
+        ? voicesByBackend.edge
+        : DEFAULT_EDGE_VOICES;
+    const rawKokoro = (Array.isArray(voicesByBackend.kokoro) && voicesByBackend.kokoro.length)
+        ? voicesByBackend.kokoro
+        : DEFAULT_KOKORO_VOICES;
+    const raw = norm === 'kokoro' ? rawKokoro : rawEdge;
+    return raw.map(v => ({ value: v.id, label: v.name }));
+}
+
+function updateVoiceSelectForBackend(backend, desiredVoice) {
+    const ttsVoiceSelect = document.getElementById('tts-voice-select');
+    if (!ttsVoiceSelect) return;
+    const norm = String(backend || 'edge').toLowerCase() === 'kokoro' ? 'kokoro' : 'edge';
+    const list = getVoiceOptionsForBackend(norm);
+    const current = desiredVoice !== undefined
+        ? desiredVoice
+        : (_pendingVoiceByBackend[norm] || cachedEnvVars.AURA_TTS_VOICE || ttsVoiceSelect.value);
+    const matchesBackend = list.some(o => o.value === current);
+    const fallbackDefault = norm === 'kokoro' ? 'af' : 'en-US-JennyNeural';
+    const chosen = matchesBackend
+        ? current
+        : (list.some(o => o.value === fallbackDefault) ? fallbackDefault : (list[0]?.value || ''));
+
+    populateSelectOptions(ttsVoiceSelect, list, chosen, false);
+    if (chosen) {
+        _pendingVoiceByBackend[norm] = chosen;
+        localStorage.setItem('aura_tts_voice', chosen);
+    }
+    localStorage.setItem('aura_tts_backend', norm);
+}
+
+function getEnvRowValue(row, key) {
+    if (!row) return '';
+    const main = row.querySelector(`.env-inline-input[data-key="${CSS.escape(key)}"]`);
+    if (!main) return '';
+    if (main.tagName === 'SELECT' && main.value === '__custom__') {
+        const customInput = row.querySelector(`.env-custom-input[data-key="${CSS.escape(key)}"]`);
+        return customInput ? customInput.value.trim() : '';
+    }
+    return main.value.trim();
+}
+
+let _envLoadInFlight = null;
+async function loadEnvSettings() {
+    if (_envLoadInFlight) return _envLoadInFlight;
+    _envLoadInFlight = _doLoadEnvSettings().finally(() => { _envLoadInFlight = null; });
+    return _envLoadInFlight;
+}
+
+async function _doLoadEnvSettings() {
+    try {
+        const res = await api('/api/settings/env');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.status !== 'success') return;
+        cachedEnvVars = data.env || {};
+        cachedEnvSchema = { ...FALLBACK_ENV_SCHEMA, ...(data.schema || {}) };
+        cachedEnvOptions = data.options || {};
+
+        const models = Array.isArray(data.available_models) ? data.available_models : [];
+        const modelOpts = models.map(m => ({ value: m, label: m }));
+
+        // 1. Populate Active Provider, Cloud Keys/Models & Ollama Reasoning/Vision dropdowns
+        const providerSelect = document.getElementById('env-llm-provider');
+        if (providerSelect) {
+            const curProv = (cachedEnvVars.AURA_LLM_PROVIDER || 'ollama').trim().toLowerCase();
+            providerSelect.value = ['ollama', 'groq', 'nvidia', 'gemini', 'openai', 'openrouter'].includes(curProv) ? curProv : 'ollama';
+        }
+
+        Object.entries(CLOUD_PROVIDER_DEFAULTS).forEach(([prov, spec]) => {
+            const keyInput = document.getElementById(`env-${prov}-api-key`);
+            const statusPill = document.getElementById(`provider-status-${prov}`);
+            const keyVal = cachedEnvVars[spec.keyEnv] || '';
+            if (keyInput) keyInput.value = keyVal;
+            if (statusPill) {
+                statusPill.classList.remove('configured', 'error');
+                if (keyVal.trim()) {
+                    const cachedCount = Array.isArray(liveProviderModels[prov]) ? liveProviderModels[prov].length : 0;
+                    statusPill.textContent = cachedCount > 0 ? `LIVE (${cachedCount})` : 'KEY SET';
+                    statusPill.classList.add('configured');
+                } else {
+                    statusPill.textContent = 'KEY OPTIONAL';
+                }
+            }
+            if (Array.isArray(liveProviderModels[prov]) && liveProviderModels[prov].length > 0 && cachedEnvSchema[spec.modelEnv]) {
+                cachedEnvSchema[spec.modelEnv].options = liveProviderModels[prov].map(m => ({ value: m, label: m }));
+            }
+            refreshCloudModelSelect(prov, cachedEnvVars[spec.modelEnv] || spec.defaultModel);
+            if (keyVal.trim().length >= 12 && !_providerAutoFetched[prov]) {
+                _providerAutoFetched[prov] = true;
+                fetchLiveModelsForProvider(prov, { silent: true });
+            }
+        });
+
+        const ollamaSelect = document.getElementById('env-ollama-model');
+        const ollamaCustom = document.getElementById('env-ollama-model-custom');
+        if (ollamaSelect) {
+            const curModel = cachedEnvVars.OLLAMA_MODEL || 'gemma4:e2b';
+            const opts = modelOpts.length ? modelOpts : [{ value: curModel, label: `${curModel} (Configured)` }];
+            populateSelectOptions(ollamaSelect, opts, curModel, true);
+            if (ollamaCustom) {
+                const isCustom = ollamaSelect.value === '__custom__';
+                ollamaCustom.style.display = isCustom ? 'block' : 'none';
+                ollamaCustom.value = isCustom ? curModel : '';
+            }
+        }
+
+        const visionSelect = document.getElementById('env-vision-model');
+        const visionCustom = document.getElementById('env-vision-model-custom');
+        if (visionSelect) {
+            const curVision = cachedEnvVars.OLLAMA_VISION_MODEL || 'qwen3-vl:4b';
+            const vOpts = modelOpts.length ? modelOpts : [{ value: curVision, label: `${curVision} (Configured)` }];
+            populateSelectOptions(visionSelect, vOpts, curVision, true);
+            if (visionCustom) {
+                const isCustom = visionSelect.value === '__custom__';
+                visionCustom.style.display = isCustom ? 'block' : 'none';
+                visionCustom.value = isCustom ? curVision : '';
+            }
+        }
+
+        const ctxSelect = document.getElementById('env-num-ctx');
+        if (ctxSelect && cachedEnvVars.OLLAMA_NUM_CTX !== undefined) {
+            const curCtx = String(cachedEnvVars.OLLAMA_NUM_CTX || '8192');
+            if (!Array.from(ctxSelect.options).some(o => o.value === curCtx)) {
+                ctxSelect.add(new Option(`${curCtx} tokens (Custom)`, curCtx));
+            }
+            ctxSelect.value = curCtx;
+        }
+
+        const keepAliveSelect = document.getElementById('env-keep-alive');
+        if (keepAliveSelect && cachedEnvVars.OLLAMA_KEEP_ALIVE !== undefined) {
+            const curKa = String(cachedEnvVars.OLLAMA_KEEP_ALIVE || '5m');
+            if (!Array.from(keepAliveSelect.options).some(o => o.value === curKa)) {
+                keepAliveSelect.add(new Option(`${curKa} (Custom)`, curKa));
+            }
+            keepAliveSelect.value = curKa;
+        }
+
+        const routerSelect = document.getElementById('env-intent-router');
+        if (routerSelect && cachedEnvVars.AURA_INTENT_ROUTER !== undefined) {
+            const rawRouter = String(cachedEnvVars.AURA_INTENT_ROUTER || 'on').trim().toLowerCase();
+            routerSelect.value = ['off', 'false', '0', 'no'].includes(rawRouter) ? 'off' : 'on';
+        }
+
+        // 2. Populate TTS & Voice fields
+        const savedTtsBackend = (cachedEnvVars.AURA_TTS_BACKEND || 'edge').trim().toLowerCase() === 'kokoro' ? 'kokoro' : 'edge';
+        const ttsBackendSelect = document.getElementById('env-tts-backend');
+        const activeTtsBackend = (_ttsBackendUserTouched && ttsBackendSelect)
+            ? (ttsBackendSelect.value === 'kokoro' ? 'kokoro' : 'edge')
+            : savedTtsBackend;
+        if (ttsBackendSelect && !_ttsBackendUserTouched) {
+            ttsBackendSelect.value = activeTtsBackend;
+        }
+        const savedTtsVoice = cachedEnvVars.AURA_TTS_VOICE || (savedTtsBackend === 'kokoro' ? 'af' : 'en-US-JennyNeural');
+        if (!_ttsBackendUserTouched) {
+            _pendingVoiceByBackend[savedTtsBackend] = savedTtsVoice;
+            updateVoiceSelectForBackend(activeTtsBackend, savedTtsVoice);
+        } else {
+            updateVoiceSelectForBackend(activeTtsBackend);
+        }
+
+        const ttsRateSlider = document.getElementById('tts-rate-slider');
+        const ttsRateVal = document.getElementById('tts-rate-val');
+        if (ttsRateSlider && cachedEnvVars.AURA_TTS_RATE !== undefined) {
+            const rawRate = cachedEnvVars.AURA_TTS_RATE || '+0%';
+            const rInt = parseInt(rawRate.replace('%', '').replace('+', '')) || 0;
+            ttsRateSlider.value = rInt;
+            if (ttsRateVal) ttsRateVal.textContent = rInt === 0 ? 'Normal (+0%)' : `${rInt > 0 ? '+' : ''}${rInt}%`;
+            localStorage.setItem('aura_tts_rate', rawRate);
+        }
+
+        // 3. Populate STT & Wake Word fields
+        const sttBackendSelect = document.getElementById('env-stt-backend');
+        if (sttBackendSelect && cachedEnvVars.AURA_STT_BACKEND) {
+            sttBackendSelect.value = String(cachedEnvVars.AURA_STT_BACKEND).trim().toLowerCase();
+        }
+        const sttModelSelect = document.getElementById('env-stt-model');
+        if (sttModelSelect && cachedEnvVars.AURA_STT_MODEL) {
+            if (!Array.from(sttModelSelect.options).some(o => o.value === cachedEnvVars.AURA_STT_MODEL)) {
+                sttModelSelect.add(new Option(cachedEnvVars.AURA_STT_MODEL, cachedEnvVars.AURA_STT_MODEL));
+            }
+            sttModelSelect.value = cachedEnvVars.AURA_STT_MODEL;
+        }
+        const sttDeviceSelect = document.getElementById('env-stt-device');
+        if (sttDeviceSelect && cachedEnvVars.AURA_STT_DEVICE) {
+            sttDeviceSelect.value = String(cachedEnvVars.AURA_STT_DEVICE).trim().toLowerCase();
+        }
+        const sttComputeSelect = document.getElementById('env-stt-compute-type');
+        if (sttComputeSelect && cachedEnvVars.AURA_STT_COMPUTE_TYPE) {
+            sttComputeSelect.value = String(cachedEnvVars.AURA_STT_COMPUTE_TYPE).trim().toLowerCase();
+        }
+
+        const wakeModelSelect = document.getElementById('env-wakeword-model');
+        if (wakeModelSelect) {
+            const wwOpts = cachedEnvOptions.wakeword_models || [{ value: 'models/hey_aura.onnx', label: 'models/hey_aura.onnx' }];
+            populateSelectOptions(wakeModelSelect, wwOpts, cachedEnvVars.AURA_WAKEWORD_MODEL || 'models/hey_aura.onnx', false);
+        }
+
+        const wakeDeviceSelect = document.getElementById('env-wakeword-device');
+        if (wakeDeviceSelect) {
+            const devOpts = cachedEnvOptions.audio_input_devices || [{ value: '', label: 'System Default Microphone' }];
+            populateSelectOptions(wakeDeviceSelect, devOpts, cachedEnvVars.AURA_WAKEWORD_DEVICE ?? '', false);
+        }
+
+        const wakeThreshSlider = document.getElementById('env-wakeword-thresh-slider');
+        const wakeThreshVal = document.getElementById('env-wakeword-thresh-val');
+        if (wakeThreshSlider && cachedEnvVars.AURA_WAKEWORD_THRESHOLD) {
+            const val = parseFloat(cachedEnvVars.AURA_WAKEWORD_THRESHOLD);
+            if (!Number.isNaN(val)) {
+                wakeThreshSlider.value = Math.round(val * 100);
+                if (wakeThreshVal) wakeThreshVal.textContent = val.toFixed(2);
+            }
+        }
+        const spkThreshSlider = document.getElementById('env-speaking-thresh-slider');
+        const spkThreshVal = document.getElementById('env-speaking-thresh-val');
+        if (spkThreshSlider && cachedEnvVars.AURA_WAKEWORD_SPEAKING_THRESHOLD) {
+            const val = parseFloat(cachedEnvVars.AURA_WAKEWORD_SPEAKING_THRESHOLD);
+            if (!Number.isNaN(val)) {
+                spkThreshSlider.value = Math.round(val * 100);
+                if (spkThreshVal) spkThreshVal.textContent = val.toFixed(2);
+            }
+        }
+
+        const cooldownSelect = document.getElementById('env-wakeword-cooldown');
+        if (cooldownSelect && cachedEnvVars.AURA_WAKEWORD_COOLDOWN !== undefined) {
+            const cur = String(cachedEnvVars.AURA_WAKEWORD_COOLDOWN || '2.0');
+            if (!Array.from(cooldownSelect.options).some(o => o.value === cur)) {
+                cooldownSelect.add(new Option(`${cur}s`, cur));
+            }
+            cooldownSelect.value = cur;
+        }
+        const persistSelect = document.getElementById('env-wakeword-persistence');
+        if (persistSelect && cachedEnvVars.AURA_WAKEWORD_PERSISTENCE !== undefined) {
+            const cur = String(cachedEnvVars.AURA_WAKEWORD_PERSISTENCE || '3');
+            if (!Array.from(persistSelect.options).some(o => o.value === cur)) {
+                persistSelect.add(new Option(`${cur} chunks`, cur));
+            }
+            persistSelect.value = cur;
+        }
+        const vadSelect = document.getElementById('env-wakeword-vad');
+        if (vadSelect && cachedEnvVars.AURA_WAKEWORD_VAD_THRESHOLD !== undefined) {
+            const cur = String(cachedEnvVars.AURA_WAKEWORD_VAD_THRESHOLD || '20.0');
+            if (!Array.from(vadSelect.options).some(o => o.value === cur)) {
+                vadSelect.add(new Option(cur, cur));
+            }
+            vadSelect.value = cur;
+        }
+        const oneShotSelect = document.getElementById('env-wakeword-one-shot');
+        if (oneShotSelect && cachedEnvVars.AURA_WAKEWORD_ONE_SHOT !== undefined) {
+            const rawOneShot = String(cachedEnvVars.AURA_WAKEWORD_ONE_SHOT || 'true').trim().toLowerCase();
+            oneShotSelect.value = ['true', '1', 'yes'].includes(rawOneShot) ? 'true' : 'false';
+        }
+        const spkVerSelect = document.getElementById('env-speaker-verification');
+        if (spkVerSelect && cachedEnvVars.AURA_SPEAKER_VERIFICATION !== undefined) {
+            const rawSpk = String(cachedEnvVars.AURA_SPEAKER_VERIFICATION || 'false').trim().toLowerCase();
+            spkVerSelect.value = ['true', '1', 'yes'].includes(rawSpk) ? 'true' : 'false';
+        }
+
+        // 4. Populate Automation, Smart Home & Server fields
+        const timeoutSelect = document.getElementById('env-visual-timeout');
+        if (timeoutSelect && cachedEnvVars.AURA_VISUAL_TASK_TIMEOUT !== undefined) {
+            const cur = String(cachedEnvVars.AURA_VISUAL_TASK_TIMEOUT || '120');
+            if (!Array.from(timeoutSelect.options).some(o => o.value === cur)) {
+                timeoutSelect.add(new Option(`${cur}s`, cur));
+            }
+            timeoutSelect.value = cur;
+        }
+        const wizSelect = document.getElementById('env-wiz-broadcast');
+        if (wizSelect) {
+            const wizOpts = cachedEnvOptions.wiz_broadcasts || [{ value: '255.255.255.255', label: '255.255.255.255 (Global Broadcast)' }];
+            populateSelectOptions(wizSelect, wizOpts, cachedEnvVars.AURA_WIZ_BROADCAST || '255.255.255.255', false);
+        }
+        const sseSelect = document.getElementById('env-sse-heartbeat');
+        if (sseSelect && cachedEnvVars.AURA_SSE_HEARTBEAT !== undefined) {
+            const cur = String(cachedEnvVars.AURA_SSE_HEARTBEAT || '15');
+            if (!Array.from(sseSelect.options).some(o => o.value === cur)) {
+                sseSelect.add(new Option(`${cur}s`, cur));
+            }
+            sseSelect.value = cur;
+        }
+
+        // 5. Render full .env Editor table with exact options
+        const filterEl = document.getElementById('env-filter-input');
+        renderEnvTable(filterEl ? filterEl.value.trim() : '');
+    } catch (e) {
+        console.error('Failed to load .env settings:', e);
+    }
+}
+
+function renderEnvTable(filterQuery = '') {
+    const tableBody = document.getElementById('env-table-body');
+    if (!tableBody) return;
+    tableBody.innerHTML = '';
+
+    const keys = Object.keys(cachedEnvVars).filter(k => {
+        if (!filterQuery) return true;
+        const q = filterQuery.toLowerCase();
+        const desc = (cachedEnvSchema[k]?.description || '').toLowerCase();
+        return k.toLowerCase().includes(q) || String(cachedEnvVars[k]).toLowerCase().includes(q) || desc.includes(q);
+    });
+
+    if (keys.length === 0) {
+        tableBody.innerHTML = '<div class="env-table-empty">No matching environment variables found.</div>';
+        return;
+    }
+
+    keys.forEach(key => {
+        const row = document.createElement('div');
+        row.className = 'env-table-row';
+        const val = String(cachedEnvVars[key] ?? '');
+        const meta = cachedEnvSchema[key];
+        const descHtml = meta?.description ? `<span class="env-key-desc" title="${escapeHtml(meta.description)}">${escapeHtml(meta.description)}</span>` : '';
+
+        let controlHtml = '';
+        let rowOptions = meta?.options;
+        if (key === 'AURA_TTS_VOICE') {
+            const activeBackend = (cachedEnvVars.AURA_TTS_BACKEND || 'edge').toLowerCase();
+            rowOptions = getVoiceOptionsForBackend(activeBackend);
+        }
+
+        if (meta && Array.isArray(rowOptions) && rowOptions.length > 0) {
+            const hasExact = rowOptions.some(o => String(o.value) === val);
+            const allowCustom = meta.type === 'select_or_custom';
+            const optsHtml = rowOptions.map(o => {
+                const ov = String(o.value);
+                const sel = ov === val ? 'selected' : '';
+                return `<option value="${escapeHtml(ov)}" ${sel}>${escapeHtml(o.label || ov)}</option>`;
+            }).join('') + (allowCustom ? `<option value="__custom__" ${!hasExact ? 'selected' : ''}>Custom value...</option>` : '');
+
+            const customStyle = (allowCustom && !hasExact) ? 'display:block;' : 'display:none;';
+            const customVal = (allowCustom && !hasExact) ? val : '';
+
+            controlHtml = `
+                <select class="env-inline-input env-inline-select" data-key="${escapeHtml(key)}" aria-label="${escapeHtml(key)}">
+                    ${optsHtml}
+                </select>
+                ${allowCustom ? `<input type="text" class="env-inline-input env-custom-input" data-key="${escapeHtml(key)}" value="${escapeHtml(customVal)}" placeholder="Enter custom value..." style="${customStyle}">` : ''}
+            `;
+        } else if (meta?.type === 'password') {
+            controlHtml = `
+                <div class="secret-input-group">
+                    <input type="password" class="env-inline-input" data-key="${escapeHtml(key)}" value="${escapeHtml(val)}" placeholder="Enter API key..." autocomplete="off">
+                    <button type="button" class="qa-btn compact env-secret-toggle" title="Show/Hide value" aria-label="Show ${escapeHtml(key)} value" aria-pressed="false">SHOW</button>
+                </div>
+            `;
+        } else {
+            controlHtml = `<input type="text" class="env-inline-input" data-key="${escapeHtml(key)}" value="${escapeHtml(val)}">`;
+        }
+
+        row.innerHTML = `
+            <div class="env-col-key">
+                <span class="env-key-name">${escapeHtml(key)}</span>
+                ${descHtml}
+            </div>
+            <div class="env-col-val">
+                ${controlHtml}
+            </div>
+            <div class="env-col-act">
+                <button type="button" class="qa-btn compact env-row-save" data-key="${escapeHtml(key)}" title="Save ${escapeHtml(key)} to .env">SAVE</button>
+            </div>
+        `;
+        tableBody.appendChild(row);
+    });
+
+    // Wire dirty tracking & custom toggle
+    tableBody.querySelectorAll('.env-table-row').forEach(row => {
+        const key = row.querySelector('[data-key]')?.getAttribute('data-key');
+        if (!key) return;
+        const mainCtrl = row.querySelector(`.env-inline-input[data-key="${CSS.escape(key)}"]`);
+        const customCtrl = row.querySelector(`.env-custom-input[data-key="${CSS.escape(key)}"]`);
+
+        const updateDirty = () => {
+            const curVal = getEnvRowValue(row, key);
+            const origVal = String(cachedEnvVars[key] ?? '');
+            row.classList.toggle('dirty', curVal !== origVal);
+        };
+
+        if (mainCtrl) {
+            mainCtrl.addEventListener('change', () => {
+                if (customCtrl && mainCtrl.tagName === 'SELECT') {
+                    const isCustom = mainCtrl.value === '__custom__';
+                    customCtrl.style.display = isCustom ? 'block' : 'none';
+                    if (isCustom && !customCtrl.value) customCtrl.focus();
+                }
+                if (key === 'AURA_TTS_BACKEND') {
+                    const voiceCtrl = tableBody.querySelector('.env-inline-select[data-key="AURA_TTS_VOICE"]');
+                    const voiceRow = voiceCtrl?.closest('.env-table-row');
+                    if (voiceCtrl && voiceRow) {
+                        const newBackend = mainCtrl.value.toLowerCase();
+                        const backendVoices = getVoiceOptionsForBackend(newBackend);
+                        const curVoice = getEnvRowValue(voiceRow, 'AURA_TTS_VOICE');
+                        const fallbackVoice = newBackend === 'kokoro' ? 'af' : 'en-US-JennyNeural';
+                        const nextVoice = backendVoices.some(o => o.value === curVoice)
+                            ? curVoice
+                            : (backendVoices.some(o => o.value === fallbackVoice) ? fallbackVoice : (backendVoices[0]?.value || ''));
+                        populateSelectOptions(voiceCtrl, backendVoices, nextVoice, true);
+                        const vCustom = voiceRow.querySelector('.env-custom-input[data-key="AURA_TTS_VOICE"]');
+                        if (vCustom) vCustom.style.display = 'none';
+                        voiceRow.classList.toggle('dirty', nextVoice !== String(cachedEnvVars.AURA_TTS_VOICE ?? ''));
+                    }
+                }
+                updateDirty();
+            });
+            mainCtrl.addEventListener('input', updateDirty);
+        }
+        if (customCtrl) {
+            customCtrl.addEventListener('input', updateDirty);
+        }
+        const secretToggle = row.querySelector('.env-secret-toggle');
+        if (secretToggle && mainCtrl) {
+            secretToggle.addEventListener('click', () => {
+                const reveal = mainCtrl.type === 'password';
+                mainCtrl.type = reveal ? 'text' : 'password';
+                secretToggle.setAttribute('aria-pressed', String(reveal));
+                secretToggle.textContent = reveal ? 'HIDE' : 'SHOW';
+                secretToggle.setAttribute('aria-label', `${reveal ? 'Hide' : 'Show'} ${key} value`);
+            });
+        }
+    });
+
+    tableBody.querySelectorAll('.env-row-save').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const key = btn.getAttribute('data-key');
+            const row = btn.closest('.env-table-row');
+            if (!key || !row) return;
+            const newVal = getEnvRowValue(row, key);
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+                const res = await api('/api/settings/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: { [key]: newVal } })
+                });
+                if (res.ok) {
+                    cachedEnvVars[key] = newVal;
+                    row.classList.remove('dirty');
+                    if (key === 'AURA_TTS_BACKEND' || key === 'AURA_TTS_VOICE') {
+                        _ttsBackendUserTouched = false;
+                    }
+                    showToast('ENVIRONMENT', `${key} saved to .env`, 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('ENVIRONMENT', `Failed to save ${key}`, 'error');
+                }
+            } catch (err) {
+                showToast('ENVIRONMENT', `Error saving ${key}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'SAVE';
+            }
+        });
+    });
+}
+
+function initEnvSettings() {
+    // 1. Load from .env API only if Settings is already active; otherwise showView('settings') loads it lazily.
+    if (isViewActive('settings')) {
+        loadEnvSettings();
+    }
+
+    // 2. Reasoning & Vision model custom toggles + TTS backend voice switcher
+    const ollamaSelect = document.getElementById('env-ollama-model');
+    const ollamaCustom = document.getElementById('env-ollama-model-custom');
+    if (ollamaSelect && ollamaCustom) {
+        ollamaSelect.addEventListener('change', () => {
+            const isCustom = ollamaSelect.value === '__custom__';
+            ollamaCustom.style.display = isCustom ? 'block' : 'none';
+            if (isCustom) ollamaCustom.focus();
+        });
+    }
+
+    const visionSelect = document.getElementById('env-vision-model');
+    const visionCustom = document.getElementById('env-vision-model-custom');
+    if (visionSelect && visionCustom) {
+        visionSelect.addEventListener('change', () => {
+            const isCustom = visionSelect.value === '__custom__';
+            visionCustom.style.display = isCustom ? 'block' : 'none';
+            if (isCustom) visionCustom.focus();
+        });
+    }
+
+    const ttsBackendSelect = document.getElementById('env-tts-backend');
+    const ttsVoiceSelectEl = document.getElementById('tts-voice-select');
+    if (ttsVoiceSelectEl) {
+        ttsVoiceSelectEl.addEventListener('change', () => {
+            const curBackend = (ttsBackendSelect?.value || 'edge').toLowerCase() === 'kokoro' ? 'kokoro' : 'edge';
+            _pendingVoiceByBackend[curBackend] = ttsVoiceSelectEl.value;
+            localStorage.setItem('aura_tts_voice', ttsVoiceSelectEl.value);
+        });
+    }
+    if (ttsBackendSelect) {
+        ttsBackendSelect.addEventListener('change', () => {
+            _ttsBackendUserTouched = true;
+            updateVoiceSelectForBackend(ttsBackendSelect.value);
+        });
+    }
+
+    // 3. Wake word threshold slider feedback
+    const wakeSlider = document.getElementById('env-wakeword-thresh-slider');
+    const wakeVal = document.getElementById('env-wakeword-thresh-val');
+    if (wakeSlider && wakeVal) {
+        wakeSlider.addEventListener('input', () => {
+            const v = (parseInt(wakeSlider.value) / 100).toFixed(2);
+            wakeVal.textContent = v;
+        });
+    }
+
+    const spkSlider = document.getElementById('env-speaking-thresh-slider');
+    const spkVal = document.getElementById('env-speaking-thresh-val');
+    if (spkSlider && spkVal) {
+        spkSlider.addEventListener('input', () => {
+            const v = (parseInt(spkSlider.value) / 100).toFixed(2);
+            spkVal.textContent = v;
+        });
+    }
+
+    // 4. Save LLM & Reasoning Settings to .env
+    const saveLlmBtn = document.getElementById('btn-save-llm-env');
+    if (saveLlmBtn) {
+        saveLlmBtn.addEventListener('click', async () => {
+            const provider = document.getElementById('env-llm-provider')?.value || 'ollama';
+            const mSel = document.getElementById('env-ollama-model')?.value;
+            const model = mSel === '__custom__' ? document.getElementById('env-ollama-model-custom')?.value.trim() : mSel;
+            const vSel = document.getElementById('env-vision-model')?.value;
+            const vision = vSel === '__custom__' ? document.getElementById('env-vision-model-custom')?.value.trim() : vSel;
+            const ctx = document.getElementById('env-num-ctx')?.value;
+            const keepAlive = document.getElementById('env-keep-alive')?.value;
+            const router = document.getElementById('env-intent-router')?.value;
+
+            const payload = { 'AURA_LLM_PROVIDER': provider };
+            if (model) payload['OLLAMA_MODEL'] = model;
+            if (vision) payload['OLLAMA_VISION_MODEL'] = vision;
+            if (ctx) payload['OLLAMA_NUM_CTX'] = ctx;
+            if (keepAlive !== undefined && keepAlive !== '') payload['OLLAMA_KEEP_ALIVE'] = keepAlive;
+            if (router) payload['AURA_INTENT_ROUTER'] = router;
+
+            saveLlmBtn.disabled = true;
+            saveLlmBtn.textContent = 'SAVING...';
+            try {
+                const res = await api('/api/settings/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: payload })
+                });
+                if (res.ok) {
+                    showToast('AI CONFIG', 'AI provider & Ollama settings saved to .env', 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('AI CONFIG', 'Failed to save to .env', 'error');
+                }
+            } catch (err) {
+                showToast('AI CONFIG', 'Failed to save to .env', 'error');
+            } finally {
+                saveLlmBtn.disabled = false;
+                saveLlmBtn.textContent = 'SAVE TO .ENV';
+            }
+        });
+    }
+
+    // 4b. Cloud AI API Keys & Models (Groq, NVIDIA NIM, Google Gemini, OpenAI)
+    document.querySelectorAll('.btn-toggle-secret').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-target');
+            const inp = targetId ? document.getElementById(targetId) : null;
+            if (inp) {
+                const reveal = inp.type === 'password';
+                inp.type = reveal ? 'text' : 'password';
+                btn.setAttribute('aria-pressed', String(reveal));
+                btn.textContent = reveal ? 'HIDE' : 'SHOW';
+            }
+        });
+    });
+
+    Object.keys(CLOUD_PROVIDER_DEFAULTS).forEach(prov => {
+        const mSel = document.getElementById(`env-${prov}-model`);
+        const mCust = document.getElementById(`env-${prov}-model-custom`);
+        if (mSel && mCust) {
+            mSel.addEventListener('change', () => {
+                const isCustom = mSel.value === '__custom__';
+                mCust.style.display = isCustom ? 'block' : 'none';
+                if (isCustom) mCust.focus();
+            });
+        }
+        const mSearch = document.getElementById(`env-${prov}-model-search`);
+        if (mSearch) {
+            mSearch.addEventListener('input', () => {
+                refreshCloudModelSelect(prov);
+            });
+        }
+        const keyInp = document.getElementById(`env-${prov}-api-key`);
+        if (keyInp) {
+            const scheduleAutoFetch = (delayMs) => {
+                clearTimeout(_providerDebounceTimers[prov]);
+                const val = keyInp.value.trim();
+                if (!val) {
+                    const pill = document.getElementById(`provider-status-${prov}`);
+                    if (pill) {
+                        pill.textContent = 'KEY OPTIONAL';
+                        pill.classList.remove('configured', 'error');
+                    }
+                    return;
+                }
+                if (val.length < 12 || val === _providerLastKey[prov]) return;
+                _providerDebounceTimers[prov] = setTimeout(() => {
+                    fetchLiveModelsForProvider(prov, { silent: false });
+                }, delayMs);
+            };
+            keyInp.addEventListener('input', () => scheduleAutoFetch(700));
+            keyInp.addEventListener('change', () => scheduleAutoFetch(50));
+        }
+    });
+
+    document.querySelectorAll('.btn-test-provider').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const prov = btn.getAttribute('data-provider');
+            if (!prov) return;
+            clearTimeout(_providerDebounceTimers[prov]);
+            await fetchLiveModelsForProvider(prov, { silent: false });
+        });
+    });
+
+    const saveCloudBtn = document.getElementById('btn-save-cloud-env');
+    if (saveCloudBtn) {
+        saveCloudBtn.addEventListener('click', async () => {
+            const payload = {};
+            Object.entries(CLOUD_PROVIDER_DEFAULTS).forEach(([prov, spec]) => {
+                const keyVal = document.getElementById(`env-${prov}-api-key`)?.value.trim() ?? '';
+                const mSel = document.getElementById(`env-${prov}-model`)?.value;
+                const modelVal = mSel === '__custom__'
+                    ? (document.getElementById(`env-${prov}-model-custom`)?.value.trim() || spec.defaultModel)
+                    : (mSel || spec.defaultModel);
+                payload[spec.keyEnv] = keyVal;
+                payload[spec.modelEnv] = modelVal;
+            });
+            saveCloudBtn.disabled = true;
+            saveCloudBtn.textContent = 'SAVING...';
+            try {
+                const res = await api('/api/settings/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: payload })
+                });
+                if (res.ok) {
+                    showToast('CLOUD API', 'API keys & models saved to .env', 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('CLOUD API', 'Failed to save API keys', 'error');
+                }
+            } catch (err) {
+                showToast('CLOUD API', 'Failed to save API keys', 'error');
+            } finally {
+                saveCloudBtn.disabled = false;
+                saveCloudBtn.textContent = 'SAVE API KEYS & MODELS TO .ENV';
+            }
+        });
+    }
+
+    // 5. Save STT & Wake Word Settings to .env
+    const saveSttBtn = document.getElementById('btn-save-stt-env');
+    if (saveSttBtn) {
+        saveSttBtn.addEventListener('click', async () => {
+            const payload = {
+                'AURA_STT_BACKEND': document.getElementById('env-stt-backend')?.value || 'local',
+                'AURA_STT_MODEL': document.getElementById('env-stt-model')?.value || 'tiny.en',
+                'AURA_STT_DEVICE': document.getElementById('env-stt-device')?.value || 'auto',
+                'AURA_STT_COMPUTE_TYPE': document.getElementById('env-stt-compute-type')?.value || 'auto',
+                'AURA_WAKEWORD_MODEL': document.getElementById('env-wakeword-model')?.value || 'models/hey_aura.onnx',
+                'AURA_WAKEWORD_DEVICE': document.getElementById('env-wakeword-device')?.value ?? '',
+                'AURA_WAKEWORD_THRESHOLD': wakeSlider ? (parseInt(wakeSlider.value) / 100).toFixed(2) : '0.60',
+                'AURA_WAKEWORD_SPEAKING_THRESHOLD': spkSlider ? (parseInt(spkSlider.value) / 100).toFixed(2) : '0.85',
+                'AURA_WAKEWORD_COOLDOWN': document.getElementById('env-wakeword-cooldown')?.value || '2.0',
+                'AURA_WAKEWORD_PERSISTENCE': document.getElementById('env-wakeword-persistence')?.value || '3',
+                'AURA_WAKEWORD_VAD_THRESHOLD': document.getElementById('env-wakeword-vad')?.value || '20.0',
+                'AURA_WAKEWORD_ONE_SHOT': document.getElementById('env-wakeword-one-shot')?.value || 'true',
+                'AURA_SPEAKER_VERIFICATION': document.getElementById('env-speaker-verification')?.value || 'false',
+            };
+
+            saveSttBtn.disabled = true;
+            saveSttBtn.textContent = 'SAVING...';
+            try {
+                const res = await api('/api/settings/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: payload })
+                });
+                if (res.ok) {
+                    showToast('SPEECH & WAKE', 'Settings written to .env', 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('SPEECH & WAKE', 'Failed to save to .env', 'error');
+                }
+            } catch (err) {
+                showToast('SPEECH & WAKE', 'Failed to save to .env', 'error');
+            } finally {
+                saveSttBtn.disabled = false;
+                saveSttBtn.textContent = 'SAVE TO .ENV';
+            }
+        });
+    }
+
+    // 6. Save Automation, Smart Home & Server Settings to .env
+    const saveSysBtn = document.getElementById('btn-save-system-env');
+    if (saveSysBtn) {
+        saveSysBtn.addEventListener('click', async () => {
+            const payload = {
+                'AURA_VISUAL_TASK_TIMEOUT': document.getElementById('env-visual-timeout')?.value || '120',
+                'AURA_WIZ_BROADCAST': document.getElementById('env-wiz-broadcast')?.value || '255.255.255.255',
+                'AURA_SSE_HEARTBEAT': document.getElementById('env-sse-heartbeat')?.value || '15',
+            };
+            saveSysBtn.disabled = true;
+            saveSysBtn.textContent = 'SAVING...';
+            try {
+                const res = await api('/api/settings/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: payload })
+                });
+                if (res.ok) {
+                    showToast('SYSTEM CONFIG', 'System .env settings saved', 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('SYSTEM CONFIG', 'Failed to save to .env', 'error');
+                }
+            } catch (err) {
+                showToast('SYSTEM CONFIG', 'Failed to save to .env', 'error');
+            } finally {
+                saveSysBtn.disabled = false;
+                saveSysBtn.textContent = 'SAVE TO .ENV';
+            }
+        });
+    }
+
+    // 7. Save Voice Settings cleanly to .env (single authoritative listener)
+    const saveVoiceBtn = document.getElementById('btn-save-voice');
+    if (saveVoiceBtn) {
+        saveVoiceBtn.addEventListener('click', async () => {
+            const v = document.getElementById('tts-voice-select')?.value || 'en-US-AvaNeural';
+            const slider = document.getElementById('tts-rate-slider');
+            const r = slider ? `${parseInt(slider.value) >= 0 ? '+' : ''}${parseInt(slider.value)}%` : '+0%';
+            const backend = document.getElementById('env-tts-backend')?.value || 'edge';
+
+            saveVoiceBtn.disabled = true;
+            saveVoiceBtn.textContent = 'SAVING...';
+            try {
+                const res = await api('/api/settings/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        settings: {
+                            'AURA_TTS_VOICE': v,
+                            'AURA_TTS_RATE': r,
+                            'AURA_TTS_BACKEND': backend
+                        }
+                    })
+                });
+                if (res.ok) {
+                    _ttsBackendUserTouched = false;
+                    _pendingVoiceByBackend[backend === 'kokoro' ? 'kokoro' : 'edge'] = v;
+                    localStorage.setItem('aura_tts_voice', v);
+                    localStorage.setItem('aura_tts_rate', r);
+                    localStorage.setItem('aura_tts_backend', backend);
+                    showToast('VOICE ENGINE', 'Voice preferences saved to .env', 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('VOICE ENGINE', 'Failed to save voice settings', 'error');
+                }
+            } catch (err) {
+                showToast('VOICE ENGINE', 'Failed to save voice settings', 'error');
+            } finally {
+                saveVoiceBtn.disabled = false;
+                saveVoiceBtn.textContent = 'SAVE PREFERENCE (TO .ENV)';
+            }
+        });
+    }
+
+    // 8. Table Filter / Search
+    const filterInput = document.getElementById('env-filter-input');
+    if (filterInput) {
+        filterInput.addEventListener('input', () => {
+            renderEnvTable(filterInput.value.trim());
+        });
+    }
+
+    // 9. Reload from disk
+    const reloadBtn = document.getElementById('btn-reload-env');
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', async () => {
+            reloadBtn.disabled = true;
+            _ttsBackendUserTouched = false;
+            _pendingVoiceByBackend = { edge: null, kokoro: null };
+            await loadEnvSettings();
+            showToast('ENVIRONMENT', 'Settings reloaded from .env file.', 'info');
+            reloadBtn.disabled = false;
+        });
+    }
+
+    // 10. Save All Table Changes to .env
+    const saveAllBtn = document.getElementById('btn-save-all-env');
+    if (saveAllBtn) {
+        saveAllBtn.addEventListener('click', async () => {
+            const rows = document.querySelectorAll('#env-table-body .env-table-row');
+            const payload = {};
+            rows.forEach(row => {
+                const k = row.querySelector('[data-key]')?.getAttribute('data-key');
+                if (k) payload[k] = getEnvRowValue(row, k);
+            });
+
+            saveAllBtn.disabled = true;
+            saveAllBtn.textContent = 'SAVING ALL...';
+            try {
+                const res = await api('/api/settings/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: payload })
+                });
+                if (res.ok) {
+                    _ttsBackendUserTouched = false;
+                    showToast('ENVIRONMENT', 'All settings successfully saved to .env', 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('ENVIRONMENT', 'Error saving .env file.', 'error');
+                }
+            } catch (err) {
+                showToast('ENVIRONMENT', 'Failed to communicate with server.', 'error');
+            } finally {
+                saveAllBtn.disabled = false;
+                saveAllBtn.textContent = 'SAVE ALL TO .ENV';
+            }
+        });
+    }
+
+    // 9. Add custom variable inline panel
+    const addVarBtn = document.getElementById('btn-add-env-var');
+    const addPanel = document.getElementById('env-add-panel');
+    const addKeyInput = document.getElementById('env-add-key-input');
+    const addValInput = document.getElementById('env-add-val-input');
+    const addConfirmBtn = document.getElementById('btn-env-add-confirm');
+    const addCancelBtn = document.getElementById('btn-env-add-cancel');
+
+    const closeAddPanel = () => {
+        if (!addPanel) return;
+        addPanel.hidden = true;
+        if (addKeyInput) addKeyInput.value = '';
+        if (addValInput) addValInput.value = '';
+        addVarBtn?.focus();
+    };
+
+    const submitAddVar = () => {
+        const rawKey = addKeyInput?.value.trim() || '';
+        const cleaned = rawKey.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+        if (!cleaned) {
+            showToast('ENVIRONMENT', 'Enter a valid variable name.', 'warning');
+            addKeyInput?.focus();
+            return;
+        }
+        cachedEnvVars[cleaned] = addValInput?.value ?? '';
+        closeAddPanel();
+        renderEnvTable(filterInput ? filterInput.value.trim() : '');
+        showToast('ENVIRONMENT', `Added ${cleaned}. Click "SAVE ALL TO .ENV" to persist.`, 'info');
+    };
+
+    if (addVarBtn && addPanel) {
+        addVarBtn.addEventListener('click', () => {
+            addPanel.hidden = !addPanel.hidden;
+            if (!addPanel.hidden) addKeyInput?.focus();
+        });
+        addConfirmBtn?.addEventListener('click', submitAddVar);
+        addCancelBtn?.addEventListener('click', closeAddPanel);
+        [addKeyInput, addValInput].forEach(inp => {
+            inp?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); submitAddVar(); }
+                if (e.key === 'Escape') { e.preventDefault(); closeAddPanel(); }
+            });
+        });
+    }
+
+    // 10. Reset .env from .env.example (uses AURA's confirmAction modal)
+    const resetEnvBtn = document.getElementById('btn-reset-env');
+    if (resetEnvBtn) {
+        resetEnvBtn.addEventListener('click', async () => {
+            const confirmed = await confirmAction({
+                title: 'Restore Default .env',
+                message: 'Restore default settings from .env.example? Your current .env will be backed up to .env.bak.',
+                okLabel: 'RESTORE DEFAULTS'
+            });
+            if (!confirmed) return;
+            resetEnvBtn.disabled = true;
+            resetEnvBtn.textContent = '...';
+            try {
+                const res = await api('/api/settings/env/reset', { method: 'POST' });
+                if (res.ok) {
+                    _ttsBackendUserTouched = false;
+                    _pendingVoiceByBackend = { edge: null, kokoro: null };
+                    showToast('ENVIRONMENT', 'Defaults restored from .env.example (backup: .env.bak)', 'success');
+                    audioSys?.playSuccess();
+                    await loadEnvSettings();
+                } else {
+                    showToast('ENVIRONMENT', 'Failed to restore defaults.', 'error');
+                }
+            } catch (err) {
+                showToast('ENVIRONMENT', 'Failed to communicate with server.', 'error');
+            } finally {
+                resetEnvBtn.disabled = false;
+                resetEnvBtn.textContent = '↺ RESTORE DEFAULTS';
+            }
+        });
+    }
+
+    // 11. Category Navigation Tabs for Settings View
+    initSettingsTabs();
+}
+
+function initSettingsTabs() {
+    const tabs = Array.from(document.querySelectorAll('.settings-tab'));
+    if (!tabs.length) return;
+    const activateTab = (tab) => {
+        const cat = tab.dataset.cat || 'all';
+        tabs.forEach(t => {
+            const isAct = t === tab;
+            t.classList.toggle('active', isAct);
+            t.setAttribute('aria-selected', String(isAct));
+        });
+        const cards = document.querySelectorAll('#view-settings .card');
+        cards.forEach(card => {
+            const cardCat = card.dataset.cat || 'ui';
+            const show = cat === 'all' || cardCat === cat;
+            card.classList.toggle('card-cat-hidden', !show);
+        });
+    };
+    tabs.forEach((tab, idx) => {
+        tab.addEventListener('click', () => activateTab(tab));
+        tab.addEventListener('keydown', (e) => {
+            let nextIdx = -1;
+            if (e.key === 'ArrowRight') nextIdx = (idx + 1) % tabs.length;
+            else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + tabs.length) % tabs.length;
+            else if (e.key === 'Home') nextIdx = 0;
+            else if (e.key === 'End') nextIdx = tabs.length - 1;
+            if (nextIdx >= 0) {
+                e.preventDefault();
+                tabs[nextIdx].focus();
+                activateTab(tabs[nextIdx]);
+            }
+        });
+    });
+}
+
+function initVoiceOverlay() {
+    const closeBtn = document.getElementById('voice-overlay-close');
+    if (closeBtn) closeBtn.onclick = closeVoiceOverlay;
+    const backdrop = document.querySelector('.voice-overlay-backdrop');
+    if (backdrop) backdrop.onclick = closeVoiceOverlay;
+
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+            e.preventDefault();
+            if (isVoiceOverlayOpen()) {
+                closeVoiceOverlay();
+            } else {
+                openVoiceOverlay();
+                if (canStartListening() && voiceBtn) voiceBtn.click();
+            }
+        } else if (e.key === 'Escape' && isVoiceOverlayOpen()) {
+            closeVoiceOverlay();
+        }
+    });
+}
+
+updateLatencyIndicator();
+setInterval(updateLatencyIndicator, 15000);
 setTimeout(loadHistory, 1500);
 initPlans();
 initMedia();
+initVoiceOverlay();
+initCommandPalette();
+initWorkspaceCanvas();
+initSlashCommands();
+initHudCustomization();
+initVoiceSettings();
+initEnvSettings();
 // First-run onboarding (checks onboarding flag, shows overlay if needed)
 if (window.Onboarding) window.Onboarding.init();
 fetchSchedule();          // one-shot initial paint; the bus maintains from here
-fetchNetworkScan();
-fetchProcesses();
+fetchAmbient();
 refreshScreenPreview();
-fetchThreats();
 Realtime.onFallback(startLegacyPolling);
 Realtime.start();

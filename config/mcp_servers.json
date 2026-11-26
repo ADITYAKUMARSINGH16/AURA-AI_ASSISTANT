@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "local_helper": {
+      "command": "python",
+      "args": ["mcp/servers/echo_server.py"],
+      "enabled": true,
+      "description": "Built-in reference Model Context Protocol server exposing ping and arithmetic tools."
+    }
+  }
+}

@@ -69,6 +69,8 @@ def test_core_health_endpoints():
     assert "enabled" in ww_data
     assert "threshold" in ww_data
     assert "persistence" in ww_data
+    assert "stt_backend" in ww_data, "Missing stt_backend in /api/wakeword/status"
+    assert "stt_model" in ww_data, "Missing stt_model in /api/wakeword/status"
     assert isinstance(ww_data["persistence"], int) and ww_data["persistence"] > 0
     assert isinstance(ww_data["threshold"], (int, float)) and 0.0 < ww_data["threshold"] <= 1.0
 
@@ -87,6 +89,16 @@ def test_core_health_endpoints():
     res_ui = client.get("/api/config/ui")
     assert res_ui.status_code == 200
     assert "quick_actions" in res_ui.json()
+
+    # Verify TTS endpoint returns 204 for empty input
+    res_tts_empty = client.get("/api/tts?text=")
+    assert res_tts_empty.status_code == 204, f"Expected 204 for empty TTS, got {res_tts_empty.status_code}"
+
+    # Verify voice.generate_tts_file includes rate=EDGE_TTS_RATE parameter
+    import inspect
+    import voice
+    tts_src = inspect.getsource(voice.generate_tts_file)
+    assert "rate=EDGE_TTS_RATE" in tts_src, "generate_tts_file must pass rate=EDGE_TTS_RATE to Communicate"
 
 
 def test_system_tray_urls():
@@ -112,6 +124,36 @@ def test_tools_and_agent_integrity():
     assert agent is not None
 
 
+def test_gpu_telemetry_resilience():
+    """Verify GPU telemetry returns structured data and handles sleep/fallback states cleanly."""
+    from api import _telemetry_payload, _get_gpu_telemetry, _last_gpu_telemetry
+    import time
+
+    payload = _telemetry_payload()
+    assert "gpu_temp" in payload
+    assert "gpu_mem" in payload
+    assert "gpu_fan" in payload
+
+    # If NVIDIA GPU is installed, verify parsed memory format
+    if _last_gpu_telemetry.get("total_mb"):
+        assert "/" in payload["gpu_mem"]
+        assert _last_gpu_telemetry["total_mb"] > 0
+        if payload["gpu_temp"] is not None:
+            assert isinstance(payload["gpu_temp"], int)
+            assert 0 <= payload["gpu_temp"] <= 120
+
+    # Test cache fallback behavior during transient dGPU sleep
+    now = time.time()
+    _last_gpu_telemetry["temp"] = 52
+    _last_gpu_telemetry["mem"] = "150 / 4096 MB"
+    _last_gpu_telemetry["fan"] = "AUTO"
+    _last_gpu_telemetry["last_seen"] = now - 5.0  # 5 seconds ago (< 30s TTL)
+
+    temp, mem, fan = _get_gpu_telemetry()
+    assert mem != "N/A"
+    assert "MB" in mem
+
+
 if __name__ == "__main__":
     print("Running system health tests...")
     test_last_screen_head_and_get()
@@ -124,4 +166,6 @@ if __name__ == "__main__":
     print("  [PASS] test_system_tray_urls")
     test_tools_and_agent_integrity()
     print("  [PASS] test_tools_and_agent_integrity")
+    test_gpu_telemetry_resilience()
+    print("  [PASS] test_gpu_telemetry_resilience")
     print("\nALL SYSTEM HEALTH TESTS PASSED!")

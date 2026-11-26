@@ -52,14 +52,16 @@ async def lifespan(app):
     event_bus.bind_loop(asyncio.get_running_loop())
     detectors = [
         # refresh_after ≈ 3x cadence: lets clients treat silence as staleness.
+        # Heavy OS/PowerShell sweeps are staggered so startup & /hud load stay fast.
         asyncio.create_task(_detect_loop("telemetry", 3, collect_telemetry_data, refresh_after=10)),
-        asyncio.create_task(_detect_loop("threats_update", 10, collect_threats_data, refresh_after=30)),
+        asyncio.create_task(_detect_loop("threats_update", 10, collect_threats_data, refresh_after=30, initial_delay=3.5)),
         asyncio.create_task(_detect_loop("permissions_update", 3, collect_permissions_data, refresh_after=10)),
         asyncio.create_task(_notifications_detector()),
-        asyncio.create_task(_detect_loop("logs_append", 10, collect_logs_data, refresh_after=30)),
-        asyncio.create_task(_detect_loop("schedule_update", 30, collect_schedule_data, refresh_after=90)),
-        asyncio.create_task(_detect_loop("processes_update", 5, collect_processes_data, refresh_after=15)),
-        asyncio.create_task(_detect_loop("security_update", 30, collect_security_data, refresh_after=90)),
+        asyncio.create_task(_detect_loop("logs_append", 10, collect_logs_data, refresh_after=30, initial_delay=1.5)),
+        asyncio.create_task(_detect_loop("schedule_update", 30, collect_schedule_data, refresh_after=90, initial_delay=4.0)),
+        asyncio.create_task(_detect_loop("processes_update", 5, collect_processes_data, refresh_after=15, initial_delay=2.5)),
+        asyncio.create_task(_detect_loop("security_update", 30, collect_security_data, refresh_after=90, initial_delay=5.0)),
+        asyncio.create_task(_detect_loop("ambient_update", 3, collect_ambient_data, refresh_after=10)),
         asyncio.create_task(_media_detector()),
     ]
     yield
@@ -68,6 +70,15 @@ async def lifespan(app):
 
 
 app = FastAPI(title="AURA API", lifespan=lifespan)
+
+@app.middleware("http")
+async def _no_cache_frontend_assets(request: Request, call_next):
+    """Ensure HTML/JS/CSS updates are immediately revalidated by the browser."""
+    response = await call_next(request)
+    path = request.url.path.lower()
+    if path in ("/", "/welcome", "/hud") or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 import threading
 import time
@@ -153,68 +164,174 @@ async def collect_logs_data():
 async def get_logs(source: str = "server"):
     return await asyncio.to_thread(_logs_payload, source)
 
-def _telemetry_payload():
-    cpu = psutil.cpu_percent(interval=None)
-    mem = psutil.virtual_memory().percent
+# Cached GPU telemetry to prevent flickering during transient Optimus D3 sleep states
+_last_gpu_telemetry = {
+    "temp": None,
+    "mem": "N/A",
+    "fan": "AUTO",
+    "total_mb": None,
+    "last_seen": 0.0
+}
+_NVIDIA_SMI_BIN = None
+
+def _find_nvidia_smi():
+    global _NVIDIA_SMI_BIN
+    if _NVIDIA_SMI_BIN and os.path.exists(_NVIDIA_SMI_BIN):
+        return _NVIDIA_SMI_BIN
+    import shutil
+    found = shutil.which("nvidia-smi")
+    if found:
+        _NVIDIA_SMI_BIN = found
+        return _NVIDIA_SMI_BIN
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    candidates = [
+        os.path.join(system_root, "System32", "nvidia-smi.exe"),
+        os.path.join(program_files, "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+        r"C:\Windows\System32\nvidia-smi.exe",
+        r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            _NVIDIA_SMI_BIN = c
+            return _NVIDIA_SMI_BIN
+    return "nvidia-smi"
+
+def _get_gpu_telemetry():
+    global _last_gpu_telemetry
+    import subprocess
+    gpu_temp = None
+    gpu_mem = "N/A"
+    gpu_fan = "AUTO"
+    total_vram_mb = _last_gpu_telemetry.get("total_mb")
     
-    battery = psutil.sensors_battery()
-    power = battery.percent if battery else 100
+    smi_bin = _find_nvidia_smi()
+    creationflags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
     
-    # Get real Wi-Fi signal strength for Uplink
-    uplink = 0
+    try:
+        gpu_result = subprocess.check_output(
+            [smi_bin, "--query-gpu=temperature.gpu,memory.used,memory.total,fan.speed", "--format=csv,noheader,nounits"],
+            text=True, stderr=subprocess.DEVNULL, timeout=2.0, creationflags=creationflags
+        )
+        for line in gpu_result.strip().splitlines():
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) >= 3:
+                # 1. Temperature (isolated try to prevent cascading failure)
+                temp_str = parts[0].strip()
+                if temp_str.lower() not in ("[not supported]", "[n/a]", "n/a", "err!", ""):
+                    try:
+                        gpu_temp = round(float(temp_str))
+                    except (ValueError, TypeError):
+                        pass
+
+                # 2. VRAM usage and total
+                used_str = parts[1].strip()
+                total_str = parts[2].strip()
+                try:
+                    total_mb = int(float(total_str))
+                    used_mb = int(float(used_str))
+                    if total_mb > 0:
+                        total_vram_mb = total_mb
+                        gpu_mem = f"{used_mb} / {total_mb} MB"
+                except (ValueError, TypeError):
+                    pass
+
+                # 3. Fan speed
+                if len(parts) >= 4:
+                    fan_str = parts[3].strip()
+                    if fan_str.lower() not in ("[not supported]", "[n/a]", "n/a", "err!", ""):
+                        try:
+                            gpu_fan = f"{round(float(fan_str))} %"
+                        except (ValueError, TypeError):
+                            gpu_fan = "AUTO"
+                    else:
+                        gpu_fan = "AUTO"
+                break
+    except Exception:
+        # nvidia-smi timed out, exited with error, or GPU is in RTD3 sleep
+        pass
+
+    now = time.time()
+    if gpu_temp is not None or gpu_mem != "N/A":
+        if gpu_temp is not None:
+            _last_gpu_telemetry["temp"] = gpu_temp
+        if gpu_mem != "N/A":
+            _last_gpu_telemetry["mem"] = gpu_mem
+        if total_vram_mb:
+            _last_gpu_telemetry["total_mb"] = total_vram_mb
+        _last_gpu_telemetry["fan"] = gpu_fan
+        _last_gpu_telemetry["last_seen"] = now
+    else:
+        # Fallback to cache if GPU is in transient D3 sleep (< 30s)
+        time_since_last = now - _last_gpu_telemetry.get("last_seen", 0.0)
+        if time_since_last < 30.0 and _last_gpu_telemetry.get("last_seen", 0.0) > 0:
+            gpu_temp = _last_gpu_telemetry.get("temp")
+            gpu_mem = _last_gpu_telemetry.get("mem", "N/A")
+            gpu_fan = _last_gpu_telemetry.get("fan", "AUTO")
+        elif total_vram_mb:
+            # If discrete GPU is asleep, report 0 used out of detected total VRAM
+            gpu_mem = f"0 / {total_vram_mb} MB"
+            gpu_fan = "AUTO"
+
+    return gpu_temp, gpu_mem, gpu_fan
+
+def _get_uplink_signal():
     try:
         import subprocess
         import re
-        result = subprocess.check_output(["netsh", "wlan", "show", "interfaces"], text=True, stderr=subprocess.DEVNULL)
+        creationflags = 0x08000000 if os.name == 'nt' else 0
+        result = subprocess.check_output(
+            ["netsh", "wlan", "show", "interfaces"],
+            text=True, stderr=subprocess.DEVNULL, timeout=1.5, creationflags=creationflags
+        )
         match = re.search(r"Signal\s*:\s*(\d+)%", result)
-        if match:
-            uplink = int(match.group(1))
+        return int(match.group(1)) if match else 0
     except Exception:
-        pass
-        
-    # --- HARDWARE THERMALS ---
-    # CPU Temp: Attempt to read real sensors via WMI (Requires Admin).
-    # No simulation: report null when real sensors are unavailable.
-    cpu_temp = None
+        return 0
+
+def _get_cpu_temp():
     try:
         import wmi
         w = wmi.WMI(namespace="root\\wmi")
         temperature_info = w.MSAcpi_ThermalZoneTemperature()
         if temperature_info:
-            cpu_temp = int((temperature_info[0].CurrentTemperature / 10.0) - 273.15)
+            return int((temperature_info[0].CurrentTemperature / 10.0) - 273.15)
     except Exception:
         pass
-        
-    # Win32_Fan is rarely populated on Windows; report null rather than a simulated RPM
-    cpu_fan = None
+    return None
+
+def _telemetry_payload():
+    from concurrent.futures import ThreadPoolExecutor
+    cpu = psutil.cpu_percent(interval=None)
+    mem = psutil.virtual_memory().percent
+    battery = psutil.sensors_battery()
+    power = battery.percent if battery else 100
+
+    # Run slow OS probes (netsh, WMI, nvidia-smi) concurrently instead of sequentially.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_uplink = pool.submit(_get_uplink_signal)
+        f_cpu_temp = pool.submit(_get_cpu_temp)
+        f_gpu = pool.submit(_get_gpu_telemetry)
+        uplink = f_uplink.result()
+        cpu_temp = f_cpu_temp.result()
+        gpu_temp, gpu_mem, gpu_fan = f_gpu.result()
+
+    # Win32_Fan is rarely populated on Windows without ring-0 kernel drivers;
+    # report 'AUTO' to indicate automated firmware/EC cooling curve
+    cpu_fan = "AUTO"
     
-    # GPU: Real data via nvidia-smi
-    gpu_temp = 0
-    gpu_mem = "0 / 0 MB"
-    gpu_fan = "N/A"
     try:
-        gpu_result = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=temperature.gpu,memory.used,memory.total,fan.speed", "--format=csv,noheader,nounits"],
-            text=True, stderr=subprocess.DEVNULL
-        )
-        parts = [p.strip() for p in gpu_result.split(',')]
-        if len(parts) >= 4:
-            gpu_temp = int(parts[0])
-            gpu_mem = f"{parts[1]} / {parts[2]} MB"
-            gpu_fan = parts[3]
-            if gpu_fan.lower() != "[not supported]" and gpu_fan.lower() != "[n/a]" and gpu_fan.lower() != "n/a":
-                gpu_fan = f"{gpu_fan} %"
-            else:
-                gpu_fan = "AUTO"
+        from llm_provider import get_active_provider, get_active_model
+        active_prov = get_active_provider()
+        active_model_label = get_active_model(active_prov).upper().split(':')[0]
+        if active_prov != "ollama":
+            active_model_label = f"{active_prov.upper()}:{active_model_label}"
     except Exception:
-        gpu_temp = None
-        gpu_mem = "N/A"
-        gpu_fan = "N/A"
-    
-    try:
-        from config import OLLAMA_MODEL
-    except ImportError:
-        OLLAMA_MODEL = "UNKNOWN"
+        try:
+            from config import OLLAMA_MODEL
+            active_model_label = OLLAMA_MODEL.upper().split(':')[0]
+        except ImportError:
+            active_model_label = "UNKNOWN"
         
     vram_gb = "0.0"
     if gpu_mem != "N/A" and gpu_mem != "0 / 0 MB":
@@ -237,12 +354,23 @@ def _telemetry_payload():
         "gpu_temp": gpu_temp,
         "gpu_mem": gpu_mem,
         "gpu_fan": gpu_fan,
+        "ambient": (lambda: _safe_get_ambient())(),
         "ai": {
-            "model": OLLAMA_MODEL.upper().split(':')[0],
+            "model": active_model_label,
             "vram": vram_gb,
             "telemetry": agent.ai_telemetry
         }
     }
+
+def _safe_get_ambient():
+    try:
+        from backend.ambient_sentinel import get_ambient_context
+        return get_ambient_context()
+    except Exception:
+        return None
+
+async def collect_ambient_data():
+    return await asyncio.to_thread(_safe_get_ambient)
 
 async def collect_telemetry_data():
     # netsh/WMI/nvidia-smi block for tens of ms; keep them off the event loop
@@ -252,6 +380,41 @@ async def collect_telemetry_data():
 @app.get("/api/telemetry")
 async def get_telemetry():
     return await collect_telemetry_data()
+
+@app.get("/api/ambient")
+async def get_ambient():
+    return await collect_ambient_data()
+
+@app.get("/api/rag/documents")
+async def get_rag_documents():
+    from tools.rag_tools import list_indexed_documents
+    return await asyncio.to_thread(list_indexed_documents)
+
+@app.post("/api/rag/index")
+async def index_rag_folder(req: Request):
+    from tools.rag_tools import index_desktop_directory
+    body = await req.json()
+    folder = body.get("directory", "")
+    max_files = body.get("max_files", 40)
+    return await asyncio.to_thread(index_desktop_directory, folder, max_files)
+
+@app.post("/api/rag/query")
+async def query_rag_knowledge(req: Request):
+    from tools.rag_tools import query_desktop_knowledge
+    body = await req.json()
+    q = body.get("query", "")
+    top_k = body.get("top_k", 5)
+    return await asyncio.to_thread(query_desktop_knowledge, q, top_k)
+
+@app.get("/api/mcp/servers")
+async def get_mcp_servers():
+    from tools.mcp_tools import list_mcp_servers
+    return await asyncio.to_thread(list_mcp_servers)
+
+@app.post("/api/mcp/reload")
+async def reload_mcp():
+    from tools.mcp_tools import reload_mcp_servers
+    return await asyncio.to_thread(reload_mcp_servers)
 
 @app.post("/api/chat")
 def chat(req: ChatRequest, background_tasks: BackgroundTasks):
@@ -340,8 +503,12 @@ async def set_trusted_mode(req: Request):
     await bus.publish("permissions_update", await collect_permissions_data())
     return {"status": "success", "enabled": enabled}
 
+class VoiceSettingsRequest(BaseModel):
+    voice: Optional[str] = None
+    rate: Optional[str] = None
+
 @app.get("/api/tts")
-def tts(text: str):
+def tts(text: str, voice: Optional[str] = None, rate: Optional[str] = None, backend: Optional[str] = None):
     import os
     if not text:
         return Response(status_code=204)
@@ -352,7 +519,7 @@ def tts(text: str):
     
     try:
         # Generate the TTS file (blocking, so this endpoint runs in a threadpool)
-        filepath = generate_tts_file(text)
+        filepath = generate_tts_file(text, voice=voice, rate=rate, backend=backend)
         if filepath and os.path.exists(filepath) and os.path.getsize(filepath) > 0:
             media_type = "audio/mpeg" if filepath.lower().endswith(".mp3") else "audio/wav"
             return FileResponse(filepath, media_type=media_type)
@@ -360,6 +527,635 @@ def tts(text: str):
         logging.error(f"TTS endpoint error: {e}")
 
     return Response(status_code=204)
+
+_EDGE_TTS_VOICES = [
+    {"id": "en-US-AvaNeural", "name": "Ava (Ultra-Realistic Conversational Female)", "gender": "Female", "locale": "en-US", "recommended": True},
+    {"id": "en-US-AndrewNeural", "name": "Andrew (Warm Natural Conversational Male)", "gender": "Male", "locale": "en-US", "recommended": True},
+    {"id": "en-US-EmmaNeural", "name": "Emma (Expressive Natural Female)", "gender": "Female", "locale": "en-US"},
+    {"id": "en-US-JennyNeural", "name": "Jenny (Warm & Friendly Female)", "gender": "Female", "locale": "en-US"},
+    {"id": "en-US-BrianNeural", "name": "Brian (Deep Articulate Male)", "gender": "Male", "locale": "en-US"},
+    {"id": "en-US-GuyNeural", "name": "Guy (Casual American Male)", "gender": "Male", "locale": "en-US"},
+    {"id": "en-GB-SoniaNeural", "name": "Sonia (Sophisticated British Female - Jarvis/Friday)", "gender": "Female", "locale": "en-GB"},
+    {"id": "en-GB-RyanNeural", "name": "Ryan (Intellectual British Male)", "gender": "Male", "locale": "en-GB"},
+    {"id": "en-US-AriaNeural", "name": "Aria (Classic Tactical Assistant)", "gender": "Female", "locale": "en-US"},
+    {"id": "en-IN-NeerjaNeural", "name": "Neerja (Natural Indian English Female)", "gender": "Female", "locale": "en-IN"},
+    {"id": "en-IN-PrabhatNeural", "name": "Prabhat (Natural Indian English Male)", "gender": "Male", "locale": "en-IN"},
+]
+
+_KOKORO_VOICE_LABELS = {
+    "af": "af (American Female - Flagship Default)",
+    "af_heart": "af_heart (American Female - Expressive Warm)",
+    "af_bella": "af_bella (American Female - Warm Expressive)",
+    "af_nicole": "af_nicole (American Female - Soft Whispery)",
+    "af_sarah": "af_sarah (American Female - Clear Professional)",
+    "af_sky": "af_sky (American Female - Bright Casual)",
+    "am_adam": "am_adam (American Male - Steady Narrator)",
+    "am_michael": "am_michael (American Male - Deep Broadcast)",
+    "bf_emma": "bf_emma (British Female - Clear)",
+    "bf_isabella": "bf_isabella (British Female - Refined)",
+    "bm_george": "bm_george (British Male - Warm)",
+    "bm_lewis": "bm_lewis (British Male - Articulate)",
+}
+
+
+def _extract_ollama_model_names(res) -> list[str]:
+    """Extract model names from ollama.list() across ollama SDK 0.3 (dict) and 0.4+/0.6+ (ListResponse)."""
+    if res is None:
+        return []
+    models_seq = getattr(res, "models", None)
+    if models_seq is None and isinstance(res, dict):
+        models_seq = res.get("models", [])
+    if not models_seq:
+        return []
+    names = []
+    for m in models_seq:
+        name = getattr(m, "model", None) or getattr(m, "name", None)
+        if not name and isinstance(m, dict):
+            name = m.get("model") or m.get("name")
+        if name:
+            names.append(str(name))
+    return names
+
+
+def _discover_kokoro_voices() -> list[dict]:
+    """Read available voice IDs from local models/kokoro/voices.json if present."""
+    import json as _json_local
+    voices_path = os.path.join(_PROJECT_ROOT, "models", "kokoro", "voices.json")
+    keys = []
+    if os.path.exists(voices_path):
+        try:
+            with open(voices_path, "r", encoding="utf-8") as f:
+                data = _json_local.load(f)
+            if isinstance(data, dict):
+                keys = sorted(data.keys())
+        except Exception:
+            pass
+    if not keys:
+        keys = ["af", "af_bella", "af_nicole", "af_sarah", "af_sky", "am_adam", "am_michael", "bf_emma", "bf_isabella", "bm_george", "bm_lewis"]
+    return [{"id": k, "name": _KOKORO_VOICE_LABELS.get(k, k), "backend": "kokoro"} for k in keys]
+
+
+def _discover_audio_input_devices() -> list[dict]:
+    """Enumerate available microphone input devices via sounddevice."""
+    devices = [{"value": "", "label": "System Default Microphone"}]
+    try:
+        import sounddevice as sd
+        seen_names = {}
+        for idx, d in enumerate(sd.query_devices()):
+            if d.get("max_input_channels", 0) > 0:
+                name = str(d.get("name", f"Device {idx}")).strip()
+                seen_names[name] = seen_names.get(name, 0) + 1
+                devices.append({
+                    "value": str(idx),
+                    "label": f"[{idx}] {name} ({d.get('max_input_channels')}ch)",
+                })
+    except Exception:
+        pass
+    return devices
+
+
+def _discover_wakeword_models() -> list[dict]:
+    """Discover local ONNX/TFLite wake word models inside models/."""
+    models_dir = os.path.join(_PROJECT_ROOT, "models")
+    found = []
+    if os.path.isdir(models_dir):
+        for fname in sorted(os.listdir(models_dir)):
+            low = fname.lower()
+            if low.endswith(".onnx") or low.endswith(".tflite"):
+                rel = f"models/{fname}"
+                found.append({"value": rel, "label": rel})
+    if not any(m["value"] == "models/hey_aura.onnx" for m in found):
+        found.insert(0, {"value": "models/hey_aura.onnx", "label": "models/hey_aura.onnx (Default)"})
+    return found
+
+
+def _discover_wiz_broadcasts() -> list[dict]:
+    """Suggest global broadcast plus local IPv4 subnet broadcast addresses."""
+    options = [{"value": "255.255.255.255", "label": "255.255.255.255 (Global Broadcast - Default)"}]
+    seen = {"255.255.255.255"}
+    try:
+        import ipaddress
+        import socket
+        for iface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET and addr.address and addr.netmask:
+                    if addr.address.startswith("127.") or addr.address.startswith("169.254."):
+                        continue
+                    try:
+                        net = ipaddress.IPv4Interface(f"{addr.address}/{addr.netmask}").network
+                        bcast = str(net.broadcast_address)
+                        if bcast not in seen:
+                            seen.add(bcast)
+                            options.append({"value": bcast, "label": f"{bcast} ({iface})"})
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return options
+
+
+def _build_env_schema(available_models: list[str], audio_devices: list[dict], wakeword_models: list[dict], kokoro_voices: list[dict], wiz_broadcasts: list[dict]) -> dict:
+    """Return exact validated option metadata for every .env configuration variable."""
+    from llm_provider import PROVIDERS
+    model_opts = [{"value": m, "label": m} for m in available_models]
+    edge_voice_opts = [{"value": v["id"], "label": f"Edge: {v['name']}"} for v in _EDGE_TTS_VOICES]
+    kokoro_voice_opts = [{"value": v["id"], "label": f"Kokoro: {v['name']}"} for v in kokoro_voices]
+
+    cloud_schema = {
+        "AURA_LLM_PROVIDER": {
+            "category": "ai",
+            "description": "Active reasoning provider (Ollama local or Cloud API)",
+            "type": "select",
+            "options": [
+                {"value": "ollama", "label": "ollama (Local Ollama)"},
+                {"value": "groq", "label": "groq (Groq Cloud)"},
+                {"value": "nvidia", "label": "nvidia (NVIDIA NIM)"},
+                {"value": "gemini", "label": "gemini (Google Gemini)"},
+                {"value": "openai", "label": "openai (OpenAI / ChatGPT)"},
+                {"value": "openrouter", "label": "openrouter (OpenRouter)"},
+            ],
+        },
+    }
+    for prov_id in ("groq", "nvidia", "gemini", "openai", "openrouter"):
+        spec = PROVIDERS[prov_id]
+        cloud_schema[spec["api_key_env"]] = {
+            "category": "ai",
+            "description": f"Custom API key for {spec['label']}",
+            "type": "password",
+            "options": [],
+        }
+        cloud_schema[spec["model_env"]] = {
+            "category": "ai",
+            "description": f"Default {spec['label']} model ID",
+            "type": "select_or_custom",
+            "options": [{"value": m, "label": m} for m in spec["curated_models"]],
+        }
+
+    return {
+        **cloud_schema,
+        "OLLAMA_MODEL": {
+            "category": "ai",
+            "description": "Primary reasoning LLM (must be pulled in Ollama)",
+            "type": "select_or_custom",
+            "options": model_opts or [{"value": "gemma4:e2b", "label": "gemma4:e2b"}],
+        },
+        "OLLAMA_VISION_MODEL": {
+            "category": "ai",
+            "description": "Dedicated vision-language model for screenshots & images",
+            "type": "select_or_custom",
+            "options": model_opts or [{"value": "qwen3-vl:4b", "label": "qwen3-vl:4b"}],
+        },
+        "OLLAMA_NUM_CTX": {
+            "category": "ai",
+            "description": "Context window size in tokens (lower reduces VRAM usage)",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "2048", "label": "2,048 tokens (Low VRAM)"},
+                {"value": "4096", "label": "4,096 tokens (Compact)"},
+                {"value": "8192", "label": "8,192 tokens (Balanced Default)"},
+                {"value": "16384", "label": "16,384 tokens (Extended)"},
+                {"value": "32768", "label": "32,768 tokens (Large)"},
+                {"value": "65536", "label": "65,536 tokens (Very Large)"},
+                {"value": "131072", "label": "131,072 tokens (Max 128K)"},
+            ],
+        },
+        "OLLAMA_KEEP_ALIVE": {
+            "category": "ai",
+            "description": "How long Ollama keeps models loaded in RAM/VRAM",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "0", "label": "0 (Unload immediately)"},
+                {"value": "2m", "label": "2m (2 minutes)"},
+                {"value": "5m", "label": "5m (5 minutes - Default)"},
+                {"value": "10m", "label": "10m (10 minutes)"},
+                {"value": "30m", "label": "30m (30 minutes)"},
+                {"value": "1h", "label": "1h (1 hour)"},
+                {"value": "-1", "label": "-1 (Keep loaded indefinitely)"},
+            ],
+        },
+        "AURA_INTENT_ROUTER": {
+            "category": "ai",
+            "description": "Pre-classify intent before main agent pass",
+            "type": "select",
+            "options": [
+                {"value": "on", "label": "on (Fast intent pre-routing)"},
+                {"value": "off", "label": "off (Direct full toolset)"},
+            ],
+        },
+        "AURA_TTS_BACKEND": {
+            "category": "audio",
+            "description": "Text-to-Speech synthesis engine",
+            "type": "select",
+            "options": [
+                {"value": "edge", "label": "edge (Microsoft Cloud Neural)"},
+                {"value": "kokoro", "label": "kokoro (100% Offline ONNX Neural)"},
+            ],
+        },
+        "AURA_TTS_VOICE": {
+            "category": "audio",
+            "description": "Voice model ID (Edge Neural or Kokoro local)",
+            "type": "select_or_custom",
+            "options": edge_voice_opts + kokoro_voice_opts,
+        },
+        "AURA_TTS_RATE": {
+            "category": "audio",
+            "description": "Speech rate adjustment",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "-20%", "label": "-20% (Slowest)"},
+                {"value": "-15%", "label": "-15%"},
+                {"value": "-10%", "label": "-10% (Slower)"},
+                {"value": "-5%", "label": "-5%"},
+                {"value": "+0%", "label": "+0% (Normal Default)"},
+                {"value": "+5%", "label": "+5%"},
+                {"value": "+10%", "label": "+10% (Faster)"},
+                {"value": "+15%", "label": "+15%"},
+                {"value": "+20%", "label": "+20% (Fastest)"},
+            ],
+        },
+        "AURA_STT_BACKEND": {
+            "category": "audio",
+            "description": "Speech-to-Text engine",
+            "type": "select",
+            "options": [
+                {"value": "local", "label": "local (faster-whisper offline)"},
+                {"value": "cloud", "label": "cloud (Google SpeechRecognition)"},
+            ],
+        },
+        "AURA_STT_MODEL": {
+            "category": "audio",
+            "description": "faster-whisper model checkpoint size",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "tiny.en", "label": "tiny.en (~39M, Fastest English)"},
+                {"value": "tiny", "label": "tiny (~39M, Multilingual)"},
+                {"value": "base.en", "label": "base.en (~74M, Balanced English)"},
+                {"value": "base", "label": "base (~74M, Multilingual)"},
+                {"value": "small.en", "label": "small.en (~244M, Accurate English)"},
+                {"value": "small", "label": "small (~244M, Multilingual)"},
+                {"value": "medium.en", "label": "medium.en (~769M, High Accuracy)"},
+                {"value": "medium", "label": "medium (~769M, Multilingual)"},
+                {"value": "large-v3", "label": "large-v3 (~1.55B, Maximum Accuracy)"},
+                {"value": "turbo", "label": "turbo (~809M, Fast High Accuracy)"},
+            ],
+        },
+        "AURA_STT_DEVICE": {
+            "category": "audio",
+            "description": "Hardware device for Whisper inference",
+            "type": "select",
+            "options": [
+                {"value": "auto", "label": "auto (CUDA if available, else CPU)"},
+                {"value": "cuda", "label": "cuda (NVIDIA GPU)"},
+                {"value": "cpu", "label": "cpu (Host CPU)"},
+            ],
+        },
+        "AURA_STT_COMPUTE_TYPE": {
+            "category": "audio",
+            "description": "CTranslate2 precision / quantization",
+            "type": "select",
+            "options": [
+                {"value": "auto", "label": "auto (float16 on CUDA, int8 on CPU)"},
+                {"value": "default", "label": "default (CTranslate2 default)"},
+                {"value": "int8", "label": "int8 (Fastest / Lowest RAM on CPU)"},
+                {"value": "float16", "label": "float16 (Fast GPU precision)"},
+                {"value": "int8_float16", "label": "int8_float16 (Low-VRAM GPU)"},
+                {"value": "float32", "label": "float32 (Full precision)"},
+            ],
+        },
+        "AURA_WAKEWORD_MODEL": {
+            "category": "audio",
+            "description": "ONNX/TFLite wake word model path",
+            "type": "select_or_custom",
+            "options": wakeword_models,
+        },
+        "AURA_WAKEWORD_THRESHOLD": {
+            "category": "audio",
+            "description": "Wake word detection confidence cutoff (0.00 - 1.00)",
+            "type": "select_or_custom",
+            "options": [
+                {"value": f"{v/100:.2f}", "label": f"{v/100:.2f}" + (" (Default)" if v == 60 else " (More sensitive)" if v <= 45 else " (Fewer false wakes)" if v >= 75 else "")}
+                for v in range(30, 100, 5)
+            ],
+        },
+        "AURA_WAKEWORD_SPEAKING_THRESHOLD": {
+            "category": "audio",
+            "description": "Higher threshold while AURA speaks (barge-in guard)",
+            "type": "select_or_custom",
+            "options": [
+                {"value": f"{v/100:.2f}", "label": f"{v/100:.2f}" + (" (Default)" if v == 85 else "")}
+                for v in range(50, 100, 5)
+            ],
+        },
+        "AURA_WAKEWORD_COOLDOWN": {
+            "category": "audio",
+            "description": "Seconds to suppress repeat wake detections",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "0.5", "label": "0.5s"},
+                {"value": "1.0", "label": "1.0s"},
+                {"value": "1.5", "label": "1.5s"},
+                {"value": "2.0", "label": "2.0s (Default)"},
+                {"value": "3.0", "label": "3.0s"},
+                {"value": "3.5", "label": "3.5s"},
+                {"value": "5.0", "label": "5.0s"},
+            ],
+        },
+        "AURA_WAKEWORD_PERSISTENCE": {
+            "category": "audio",
+            "description": "Consecutive 80ms chunks required above threshold",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "1", "label": "1 chunk (Instant)"},
+                {"value": "2", "label": "2 chunks (Fast)"},
+                {"value": "3", "label": "3 chunks (Default)"},
+                {"value": "4", "label": "4 chunks"},
+                {"value": "5", "label": "5 chunks"},
+                {"value": "6", "label": "6 chunks (Strict)"},
+                {"value": "8", "label": "8 chunks (Very Strict)"},
+            ],
+        },
+        "AURA_WAKEWORD_VAD_THRESHOLD": {
+            "category": "audio",
+            "description": "Audio RMS energy cutoff to skip silence",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "0.0", "label": "0.0 (Disabled - Always infer)"},
+                {"value": "10.0", "label": "10.0 (Quiet room / sensitive mic)"},
+                {"value": "15.0", "label": "15.0 (Low noise)"},
+                {"value": "20.0", "label": "20.0 (Default)"},
+                {"value": "30.0", "label": "30.0 (Moderate background noise)"},
+                {"value": "50.0", "label": "50.0 (Noisy room)"},
+                {"value": "100.0", "label": "100.0 (Very noisy room)"},
+            ],
+        },
+        "AURA_WAKEWORD_DEVICE": {
+            "category": "audio",
+            "description": "Microphone input device index or name",
+            "type": "select_or_custom",
+            "options": audio_devices,
+        },
+        "AURA_WAKEWORD_ONE_SHOT": {
+            "category": "audio",
+            "description": "Stream pre-roll utterance right after wake word",
+            "type": "select",
+            "options": [
+                {"value": "true", "label": "true (Stream utterance immediately)"},
+                {"value": "false", "label": "false (Wait for pause)"},
+            ],
+        },
+        "AURA_SPEAKER_VERIFICATION": {
+            "category": "audio",
+            "description": "Verify enrolled speaker voiceprint on wake word",
+            "type": "select",
+            "options": [
+                {"value": "false", "label": "false (Allow any speaker - Default)"},
+                {"value": "true", "label": "true (Enforce voiceprint gate)"},
+            ],
+        },
+        "AURA_VISUAL_TASK_TIMEOUT": {
+            "category": "env",
+            "description": "Time budget in seconds for visual desktop agent",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "30", "label": "30s (Quick tasks)"},
+                {"value": "60", "label": "60s"},
+                {"value": "90", "label": "90s"},
+                {"value": "120", "label": "120s (Default)"},
+                {"value": "180", "label": "180s (Complex workflows)"},
+                {"value": "240", "label": "240s"},
+                {"value": "300", "label": "300s (Max 5 min)"},
+            ],
+        },
+        "AURA_WIZ_BROADCAST": {
+            "category": "env",
+            "description": "WiZ smart-bulb UDP discovery broadcast address",
+            "type": "select_or_custom",
+            "options": wiz_broadcasts,
+        },
+        "AURA_SSE_HEARTBEAT": {
+            "category": "env",
+            "description": "Server-Sent Events keep-alive ping interval (seconds)",
+            "type": "select_or_custom",
+            "options": [
+                {"value": "5", "label": "5s (Aggressive proxy keep-alive)"},
+                {"value": "10", "label": "10s"},
+                {"value": "15", "label": "15s (Default)"},
+                {"value": "20", "label": "20s"},
+                {"value": "30", "label": "30s"},
+                {"value": "60", "label": "60s"},
+            ],
+        },
+    }
+
+
+def _sync_runtime_env(env_map: dict):
+    """Apply updated environment values to live in-process modules."""
+    if not env_map:
+        return
+    try:
+        import config
+    except Exception:
+        config = None
+    try:
+        import agent
+    except Exception:
+        agent = None
+    try:
+        import voice
+    except Exception:
+        voice = None
+
+    if "AURA_TTS_VOICE" in env_map and voice:
+        voice.set_tts_voice(env_map["AURA_TTS_VOICE"], None)
+    if "AURA_TTS_RATE" in env_map and voice:
+        voice.set_tts_voice(None, env_map["AURA_TTS_RATE"])
+    if "OLLAMA_MODEL" in env_map:
+        if config:
+            config.OLLAMA_MODEL = env_map["OLLAMA_MODEL"]
+        if agent:
+            agent.OLLAMA_MODEL = env_map["OLLAMA_MODEL"]
+        _ollama_health_cache["data"] = None
+        _ollama_health_cache["ts"] = 0.0
+    if "OLLAMA_VISION_MODEL" in env_map and config:
+        config.OLLAMA_VISION_MODEL = env_map["OLLAMA_VISION_MODEL"]
+    if "OLLAMA_NUM_CTX" in env_map and config:
+        try:
+            config.OLLAMA_NUM_CTX = int(env_map["OLLAMA_NUM_CTX"])
+        except ValueError:
+            pass
+    if "OLLAMA_KEEP_ALIVE" in env_map:
+        if config:
+            config.OLLAMA_KEEP_ALIVE = env_map["OLLAMA_KEEP_ALIVE"]
+        if agent:
+            agent.OLLAMA_KEEP_ALIVE = env_map["OLLAMA_KEEP_ALIVE"]
+
+
+@app.get("/api/voice/options")
+def get_voice_options():
+    import voice
+    return {
+        "status": "success",
+        "current_voice": voice.get_tts_voice(),
+        "current_rate": voice.get_tts_rate(),
+        "voices": _EDGE_TTS_VOICES,
+        "kokoro_voices": _discover_kokoro_voices(),
+    }
+
+class EnvSettingsRequest(BaseModel):
+    settings: dict = {}
+
+@app.get("/api/settings/env")
+async def get_env_settings():
+    """Retrieve all configuration keys from .env plus discovered models, devices, and exact option schemas."""
+    import dotenv
+    dotenv_path = os.path.join(_PROJECT_ROOT, ".env")
+    example_path = os.path.join(_PROJECT_ROOT, ".env.example")
+    if not os.path.exists(dotenv_path) and os.path.exists(example_path):
+        import shutil
+        shutil.copyfile(example_path, dotenv_path)
+
+    env_vals = {}
+    if os.path.exists(example_path):
+        for k, v in dotenv.dotenv_values(example_path).items():
+            env_vals[k] = "" if v is None else str(v)
+    if os.path.exists(dotenv_path):
+        for k, v in dotenv.dotenv_values(dotenv_path).items():
+            env_vals[k] = "" if v is None else str(v)
+
+    async def _fetch_ollama_models():
+        try:
+            import ollama
+            return await asyncio.wait_for(
+                asyncio.to_thread(lambda: _extract_ollama_model_names(ollama.list())),
+                timeout=1.5
+            )
+        except Exception:
+            return []
+
+    available_models, audio_devices = await asyncio.gather(
+        _fetch_ollama_models(),
+        asyncio.to_thread(_discover_audio_input_devices),
+    )
+    wakeword_models = _discover_wakeword_models()
+    kokoro_voices = _discover_kokoro_voices()
+    wiz_broadcasts = _discover_wiz_broadcasts()
+    schema = _build_env_schema(available_models, audio_devices, wakeword_models, kokoro_voices, wiz_broadcasts)
+
+    return {
+        "status": "success",
+        "env": env_vals,
+        "available_models": available_models,
+        "options": {
+            "ollama_models": available_models,
+            "audio_input_devices": audio_devices,
+            "wakeword_models": wakeword_models,
+            "tts_voices": {
+                "edge": _EDGE_TTS_VOICES,
+                "kokoro": kokoro_voices,
+            },
+            "wiz_broadcasts": wiz_broadcasts,
+        },
+        "schema": schema,
+    }
+
+@app.post("/api/settings/env")
+async def update_env_settings(req: EnvSettingsRequest):
+    """Update settings directly in the .env file and synchronize live process environment."""
+    import dotenv
+    import re
+    dotenv_path = os.path.join(_PROJECT_ROOT, ".env")
+    if not os.path.exists(dotenv_path):
+        example_path = os.path.join(_PROJECT_ROOT, ".env.example")
+        if os.path.exists(example_path):
+            import shutil
+            shutil.copyfile(example_path, dotenv_path)
+
+    updated = {}
+    for k, v in req.settings.items():
+        if v is None:
+            continue
+        key_str = str(k).strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key_str):
+            continue
+        val_str = str(v).strip()
+        dotenv.set_key(dotenv_path, key_str, val_str, quote_mode="auto")
+        os.environ[key_str] = val_str
+        updated[key_str] = val_str
+
+    _sync_runtime_env(updated)
+
+    return {
+        "status": "success",
+        "updated": updated,
+        "message": f"Successfully updated {len(updated)} configuration(s) in .env file."
+    }
+
+class ProviderTestRequest(BaseModel):
+    provider: str
+    api_key: Optional[str] = None
+
+@app.post("/api/settings/provider/test")
+async def test_cloud_provider(req: ProviderTestRequest):
+    """Verify a cloud AI API key and fetch live model IDs from that provider."""
+    from llm_provider import fetch_provider_models
+    return await asyncio.to_thread(fetch_provider_models, req.provider, req.api_key)
+
+@app.post("/api/settings/env/reset")
+async def reset_env_settings():
+    """Backup current .env and restore factory defaults from .env.example."""
+    import dotenv
+    import shutil
+    dotenv_path = os.path.join(_PROJECT_ROOT, ".env")
+    example_path = os.path.join(_PROJECT_ROOT, ".env.example")
+    bak_path = os.path.join(_PROJECT_ROOT, ".env.bak")
+
+    if os.path.exists(dotenv_path):
+        try:
+            shutil.copyfile(dotenv_path, bak_path)
+        except Exception as e:
+            logging.warning(f"Failed to create .env backup: {e}")
+
+    if os.path.exists(example_path):
+        try:
+            shutil.copyfile(example_path, dotenv_path)
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to restore .env: {e}"}
+    else:
+        return {"status": "error", "message": ".env.example template not found on server"}
+
+    raw_vals = dict(dotenv.dotenv_values(dotenv_path))
+    env_vals = {k: ("" if v is None else str(v)) for k, v in raw_vals.items()}
+    for k, v in env_vals.items():
+        os.environ[k] = v
+
+    _sync_runtime_env(env_vals)
+
+    return {
+        "status": "success",
+        "message": "Configuration restored to defaults. Backup saved to .env.bak.",
+        "env": env_vals
+    }
+
+@app.post("/api/voice/settings")
+def update_voice_settings(req: VoiceSettingsRequest):
+    import voice
+    voice.set_tts_voice(req.voice, req.rate)
+    try:
+        import dotenv
+        dotenv_path = os.path.join(_PROJECT_ROOT, ".env")
+        if req.voice:
+            dotenv.set_key(dotenv_path, "AURA_TTS_VOICE", req.voice, quote_mode="auto")
+            os.environ["AURA_TTS_VOICE"] = req.voice
+        if req.rate:
+            dotenv.set_key(dotenv_path, "AURA_TTS_RATE", req.rate, quote_mode="auto")
+            os.environ["AURA_TTS_RATE"] = req.rate
+    except Exception as e:
+        logging.warning(f"Failed to persist voice settings to .env: {e}")
+    return {
+        "status": "success",
+        "voice": voice.get_tts_voice(),
+        "rate": voice.get_tts_rate()
+    }
 
 @app.post("/api/voice/listen")
 def voice_listen(background_tasks: BackgroundTasks):
@@ -454,12 +1250,12 @@ async def health_ollama():
             raise TimeoutError("Ollama list() timed out after 3s")
 
         latency_ms = int((time.perf_counter() - start) * 1000)
-        models = result.get("models", []) if isinstance(result, dict) else []
+        models = _extract_ollama_model_names(result)
         # Pick the configured model or first available
         from config import OLLAMA_MODEL
         model_name = OLLAMA_MODEL
-        if models and not any(m.get("name") == model_name for m in models):
-            model_name = models[0].get("name", model_name)
+        if models and model_name not in models:
+            model_name = models[0]
 
         data = {"ok": True, "model": model_name, "latency_ms": latency_ms}
     except Exception as e:
@@ -689,27 +1485,30 @@ async def update_ui_config(req: QuickActionsUpdate):
     return {"status": "success", "actions": cleaned}
 
 
+def _network_scan_sync():
+    import subprocess
+    import platform
+
+    if platform.system().lower() != "windows":
+        return {"status": "error", "message": "Network scanner is currently only optimized for Windows systems."}
+
+    creationflags = 0x08000000 if os.name == 'nt' else 0
+    result = subprocess.check_output(["arp", "-a"], text=True, timeout=3.0, creationflags=creationflags)
+    devices = []
+    for line in result.split('\n'):
+        parts = line.split()
+        if len(parts) >= 2 and "." in parts[0] and "-" in parts[1]:
+            ip = parts[0]
+            mac = parts[1]
+            if ip.startswith("192.") or ip.startswith("10.") or ip.startswith("172."):
+                devices.append({"ip": ip, "mac": mac, "type": "node"})
+
+    return {"status": "success", "nodes": devices}
+
 @app.get("/api/network/scan")
 async def network_scan():
     try:
-        import subprocess
-        import platform
-        
-        if platform.system().lower() != "windows":
-            return {"status": "error", "message": "Network scanner is currently only optimized for Windows systems."}
-            
-        result = subprocess.check_output(["arp", "-a"], text=True)
-        lines = result.split('\n')
-        devices = []
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2 and "." in parts[0] and "-" in parts[1]:
-                ip = parts[0]
-                mac = parts[1]
-                if ip.startswith("192.") or ip.startswith("10.") or ip.startswith("172."):
-                    devices.append({"ip": ip, "mac": mac, "type": "node"})
-                    
-        return {"status": "success", "nodes": devices}
+        return await asyncio.to_thread(_network_scan_sync)
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -803,13 +1602,15 @@ async def get_threats():
 def _fingerprint(data) -> str:
     return hashlib.sha256(_json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
-async def _detect_loop(event_type: str, interval: int, collector, refresh_after: int = None):
+async def _detect_loop(event_type: str, interval: int, collector, refresh_after: int = None, initial_delay: float = 0.0):
     """Poll a shared collector and publish when the payload changes.
 
     refresh_after (seconds): even an UNCHANGED payload is republished after this
     much silence, so clients can treat a missing channel as a liveness/staleness
     signal rather than "nothing happened".
     """
+    if initial_delay > 0:
+        await asyncio.sleep(initial_delay)
     last = None
     last_pub = 0.0
     while True:
@@ -918,15 +1719,31 @@ async def sse_events():
     )
 
 # --------------------------------------------------------------------------
-def _security_payload():
+_security_cache = {"ts": 0.0, "data": None}
+_security_cache_lock = threading.Lock()
+
+def _security_payload(force_refresh: bool = False):
+    from concurrent.futures import ThreadPoolExecutor
     from tools.security_tools import get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes
+    now = time.time()
+    if not force_refresh:
+        with _security_cache_lock:
+            if _security_cache["data"] is not None and (now - _security_cache["ts"]) < 15.0:
+                return _security_cache["data"]
     try:
-        defender = get_windows_defender_status()
-        firewall = get_firewall_status()
-        ports = get_listening_ports()
-        files = get_suspicious_files()
-        processes = analyze_suspicious_processes()
-        devices = get_removable_devices()
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            f_def = pool.submit(get_windows_defender_status)
+            f_fw = pool.submit(get_firewall_status)
+            f_ports = pool.submit(get_listening_ports)
+            f_files = pool.submit(get_suspicious_files)
+            f_procs = pool.submit(analyze_suspicious_processes)
+            f_devs = pool.submit(get_removable_devices)
+            defender = f_def.result()
+            firewall = f_fw.result()
+            ports = f_ports.result()
+            files = f_files.result()
+            processes = f_procs.result()
+            devices = f_devs.result()
 
         # Calculate simplistic risk level based on keywords
         alerts = []
@@ -941,7 +1758,7 @@ def _security_payload():
         if risk_level == "LOW" and ("DISABLED" in firewall or "No active listening ports" not in ports):
             risk_level = "MEDIUM"
 
-        return {
+        payload = {
             "status": "success",
             "risk_level": risk_level,
             "alerts": alerts,
@@ -952,6 +1769,10 @@ def _security_payload():
             "processes": processes,
             "devices": devices
         }
+        with _security_cache_lock:
+            _security_cache["ts"] = time.time()
+            _security_cache["data"] = payload
+        return payload
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1174,7 +1995,7 @@ def run_schedule():
                         ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
                         text=True, stderr=subprocess.DEVNULL
                     )
-                    gpu_temp = int(gpu_result.strip())
+                    gpu_temp = round(float(gpu_result.strip()))
                     if gpu_temp > thresh.get("gpu_temp_c", 85):
                         violations["gpu_temp"] += 1
                     else:

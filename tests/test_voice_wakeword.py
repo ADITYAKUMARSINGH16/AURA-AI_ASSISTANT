@@ -169,6 +169,28 @@ def test_onnx_inference_benchmark():
     assert bench["avg_ms"] < 25.0, f"ONNX inference too slow: {bench['avg_ms']}ms"
 
 
+def test_offline_stt_transcription():
+    """Verify faster-whisper offline speech-to-text initialization and transcription."""
+    whisper = voice._init_whisper()
+    assert whisper is not None, "faster-whisper model failed to initialize"
+
+    # Empty array handling
+    assert voice.transcribe_audio(np.array([], dtype=np.int16)) == ""
+
+    # 1 second of silence -> should safely transcribe with zero crash and return empty string
+    silence = np.zeros(16000, dtype=np.int16)
+    result = voice.transcribe_audio(silence, sample_rate=16000)
+    assert isinstance(result, str), f"Expected string transcription, got {type(result)}"
+
+
+def test_offline_stt_status_telemetry():
+    """Verify STT engine and model are surfaced in telemetry."""
+    status = voice.get_wakeword_status()
+    assert "stt_backend" in status, "Missing stt_backend in telemetry status"
+    assert "stt_model" in status, "Missing stt_model in telemetry status"
+    assert status["stt_backend"] in ("local", "cloud"), f"Invalid stt_backend: {status['stt_backend']}"
+
+
 if __name__ == "__main__":
     print("Running comprehensive voice & wakeword regression tests...")
     test_listening_flag_lifecycle()
@@ -191,4 +213,8 @@ if __name__ == "__main__":
     print("  [PASS] test_vad_silence_filtering")
     test_onnx_inference_benchmark()
     print("  [PASS] test_onnx_inference_benchmark")
+    test_offline_stt_transcription()
+    print("  [PASS] test_offline_stt_transcription")
+    test_offline_stt_status_telemetry()
+    print("  [PASS] test_offline_stt_status_telemetry")
     print("\nALL VOICE WAKEWORD TESTS PASSED!")

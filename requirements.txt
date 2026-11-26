@@ -22,6 +22,10 @@ edge-tts
 pywizlight
 openwakeword
 onnxruntime
+kokoro-onnx
+soundfile
+faster-whisper
+ctranslate2
 websockets
 pystray
 # Now Playing (SMTC): modern winrt projection family — legacy winsdk has no
@@ -32,3 +36,5 @@ winrt-windows-media-control
 winrt-windows-foundation
 winrt-windows-storage-streams
 winrt-windows-foundation-collections
+pywinauto
+matplotlib

@@ -19,5 +19,9 @@ echo.
 echo Launching System Tray Daemon...
 echo You can find the AURA icon in your Windows taskbar.
 echo.
-python tray.py
+if exist "%~dp0.venv\Scripts\python.exe" (
+    "%~dp0.venv\Scripts\python.exe" tray.py
+) else (
+    python tray.py
+)
 pause

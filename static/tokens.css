@@ -85,6 +85,8 @@
 }
 
 :root {
+    color-scheme: dark;
+
     /* ── Type stacks ───────────────────────────────────────── */
     --font-display: 'Orbitron', sans-serif;      /* logo + boot ONLY */
     --font-ui: 'Space Grotesk', system-ui, sans-serif;
@@ -99,9 +101,9 @@
 
     /* ── Text ──────────────────────────────────────────────── */
     --text-primary: #e9eff8;
-    --text-secondary: rgba(233, 239, 248, 0.74);
-    --text-dim: rgba(233, 239, 248, 0.52);
-    --text-faint: rgba(233, 239, 248, 0.34);
+    --text-secondary: rgba(233, 239, 248, 0.78);
+    --text-dim: rgba(233, 239, 248, 0.64);
+    --text-faint: rgba(233, 239, 248, 0.48);
 
     /* ── Accents (theme-remap targets — do not rename) ─────── */
     --cyan: #00f0ff;
@@ -193,9 +195,28 @@
     --header-h: 56px;
     --sidebar-w: 216px;
     --sidebar-w-collapsed: 68px;
+
+    /* ── Glassmorphism ─────────────────────────────────────── */
+    --glass-surface: rgba(11, 18, 32, 0.76);
+    --glass-surface-elevated: rgba(16, 26, 46, 0.88);
+    --glass-border: rgba(0, 240, 255, 0.18);
+    --glass-blur: blur(14px);
+    --glass-glow: 0 0 24px rgba(0, 240, 255, 0.12);
 }
 
 /* ── Theme variants (remap accents; used by HUD theme dots) ── */
+html.theme-amber {
+    --cyan: #ffaa00;
+    --cyan-strong: #ffaa00;
+    --purple: #ff6600;
+    --cyan-mid: rgba(255, 170, 0, 0.4);
+    --cyan-dim: rgba(255, 170, 0, 0.14);
+    --cyan-ghost: rgba(255, 170, 0, 0.05);
+    --border-accent: rgba(255, 170, 0, 0.35);
+    --glass-border: rgba(255, 170, 0, 0.2);
+    --glass-glow: 0 0 24px rgba(255, 170, 0, 0.14);
+    --glow-accent: 0 0 20px rgba(255, 170, 0, 0.25), 0 0 60px rgba(255, 170, 0, 0.08);
+}
 html.theme-crimson {
     --cyan: #ff2a2a;
     --cyan-strong: #ff2a2a;
@@ -204,6 +225,8 @@ html.theme-crimson {
     --cyan-dim: rgba(255, 42, 42, 0.14);
     --cyan-ghost: rgba(255, 42, 42, 0.05);
     --border-accent: rgba(255, 42, 42, 0.35);
+    --glass-border: rgba(255, 42, 42, 0.2);
+    --glass-glow: 0 0 24px rgba(255, 42, 42, 0.14);
     --glow-accent: 0 0 20px rgba(255, 42, 42, 0.25), 0 0 60px rgba(255, 42, 42, 0.08);
 }
 html.theme-emerald {
@@ -214,6 +237,8 @@ html.theme-emerald {
     --cyan-dim: rgba(0, 255, 102, 0.14);
     --cyan-ghost: rgba(0, 255, 102, 0.05);
     --border-accent: rgba(0, 255, 102, 0.35);
+    --glass-border: rgba(0, 255, 102, 0.2);
+    --glass-glow: 0 0 24px rgba(0, 255, 102, 0.14);
     --glow-accent: 0 0 20px rgba(0, 255, 102, 0.25), 0 0 60px rgba(0, 255, 102, 0.08);
 }
 html.theme-violet {
@@ -224,7 +249,44 @@ html.theme-violet {
     --cyan-dim: rgba(217, 70, 239, 0.14);
     --cyan-ghost: rgba(217, 70, 239, 0.05);
     --border-accent: rgba(217, 70, 239, 0.35);
+    --glass-border: rgba(217, 70, 239, 0.2);
+    --glass-glow: 0 0 24px rgba(217, 70, 239, 0.14);
     --glow-accent: 0 0 20px rgba(217, 70, 239, 0.25), 0 0 60px rgba(217, 70, 239, 0.08);
+}
+
+/* ── Accessibility helpers ─────────────────────────────────── */
+.visually-hidden:where(:not(:focus-within, :active)) {
+    position: absolute !important;
+    clip-path: inset(50%) !important;
+    overflow: hidden !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    white-space: nowrap !important;
+}
+
+.skip-link:focus-visible {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 2000;
+    padding: 8px 14px;
+    background: var(--bg-base);
+    color: var(--cyan);
+    border: 2px solid var(--cyan);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+@media (forced-colors: active) {
+    :focus-visible {
+        outline: 2px solid Highlight !important;
+        outline-offset: 2px;
+    }
 }
 
 /* ── Reduced motion ────────────────────────────────────────── */

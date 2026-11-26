@@ -4,7 +4,7 @@ import threading
 import time
 import re
 import asyncio
-from tools import get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, search_memory, forget_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, run_aura_diagnostics
+from tools import get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, search_memory, forget_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, run_aura_diagnostics, list_open_windows, get_window_controls, click_ui_element, set_ui_element_text, execute_python_code, index_desktop_directory, query_desktop_knowledge, list_indexed_documents, clear_indexed_documents, get_ambient_context, list_mcp_servers, reload_mcp_servers, call_mcp_tool
 from permissions import confirm_pending_action, reject_pending_action, evaluate_permission
 from config import OLLAMA_MODEL, chat_options, OLLAMA_KEEP_ALIVE
 from memory import load_memory, save_memory
@@ -16,7 +16,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-available_tools = [get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, search_memory, forget_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, confirm_pending_action, reject_pending_action, run_aura_diagnostics]
+available_tools = [get_system_time, get_system_info, open_application, close_application, web_search, list_directory, read_file, read_clipboard, control_media, control_system_power, read_screen, run_threat_scan, manage_schedule, scan_home_network, sync_archive, remember_fact, search_memory, forget_memory, discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music, execute_visual_task, get_active_window, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes, report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal, confirm_pending_action, reject_pending_action, run_aura_diagnostics, list_open_windows, get_window_controls, click_ui_element, set_ui_element_text, execute_python_code, index_desktop_directory, query_desktop_knowledge, list_indexed_documents, clear_indexed_documents, get_ambient_context, list_mcp_servers, reload_mcp_servers, call_mcp_tool]
 tool_map = {tool.__name__: tool for tool in available_tools}
 
 def _summarize_args(arguments) -> str:
@@ -30,15 +30,16 @@ def _summarize_args(arguments) -> str:
 TOOL_CATEGORIES = {
     "CHAT": [],
     "VISION": [read_screen],
-    "SYSTEM": [get_system_time, get_system_info, open_application, close_application, control_media, control_system_power, manage_schedule, sync_archive, confirm_pending_action, reject_pending_action, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, run_aura_diagnostics],
-    "COMPUTER_CONTROL": [open_application, close_application, read_clipboard, execute_visual_task, get_active_window],
-    "FILE": [list_directory, read_file, sync_archive],
+    "SYSTEM": [get_system_time, get_system_info, open_application, close_application, control_media, control_system_power, manage_schedule, sync_archive, confirm_pending_action, reject_pending_action, get_cpu_info, get_gpu_info, get_ram_usage, get_disk_usage, get_battery_health, get_network_info, get_active_processes, get_startup_programs, get_windows_services, get_installed_applications, get_windows_event_logs, get_system_uptime, run_aura_diagnostics, execute_python_code, get_ambient_context, list_mcp_servers, reload_mcp_servers, call_mcp_tool],
+    "COMPUTER_CONTROL": [open_application, close_application, read_clipboard, execute_visual_task, get_active_window, list_open_windows, get_window_controls, click_ui_element, set_ui_element_text, get_ambient_context, list_mcp_servers, call_mcp_tool],
+    "FILE": [list_directory, read_file, sync_archive, index_desktop_directory, query_desktop_knowledge, list_indexed_documents, clear_indexed_documents],
     "WEB_RESEARCH": [web_search],
-    "MEMORY": [remember_fact, search_memory, forget_memory],
+    "MEMORY": [remember_fact, search_memory, forget_memory, query_desktop_knowledge, index_desktop_directory],
     "SMART_HOME": [discover_smart_devices, get_smart_device_status, control_smart_device, set_smart_scene, search_spotify, play_spotify_music],
     "SECURITY": [run_threat_scan, scan_home_network, get_windows_defender_status, get_firewall_status, get_listening_ports, get_suspicious_files, get_removable_devices, analyze_suspicious_processes],
     "PLANNER": [report_progress, create_temporary_plan, create_goal, list_goals, toggle_goal],
-    "VOICE": []
+    "VOICE": [],
+    "CODE": [execute_python_code]
 }
 
 def analyze_intent(user_input: str) -> dict:
@@ -53,7 +54,7 @@ def analyze_intent(user_input: str) -> dict:
     skill_desc = registry.get_all_skill_descriptions()
     router_prompt = f"""
 You are the AURA intent router. Classify the user's intent into one or more of the following categories:
-CHAT, VISION, SYSTEM, COMPUTER_CONTROL, FILE, WEB_RESEARCH, MEMORY, SMART_HOME, SECURITY, PLANNER, VOICE.
+CHAT, VISION, SYSTEM, COMPUTER_CONTROL, FILE, WEB_RESEARCH, MEMORY, SMART_HOME, SECURITY, PLANNER, VOICE, CODE.
 
 Determine if the request is 'is_simple' (e.g. general knowledge, greetings, single commands) and if it is 'is_dangerous' (e.g. deleting files, formatting drives, terminating essential processes, risky system changes). Also determine 'requires_plan' for multi-step tasks.
 
@@ -69,20 +70,19 @@ Return ONLY a valid JSON object matching this schema:
   "active_skill": "skill_name"
 }}
 """
-    router_fallback = {"categories": ["CHAT", "SYSTEM", "COMPUTER_CONTROL", "FILE", "WEB_RESEARCH", "MEMORY", "SMART_HOME", "SECURITY"], "is_simple": False, "is_dangerous": False, "requires_plan": False, "active_skill": None}
+    router_fallback = {"categories": ["CHAT", "SYSTEM", "COMPUTER_CONTROL", "FILE", "WEB_RESEARCH", "MEMORY", "SMART_HOME", "SECURITY", "CODE"], "is_simple": False, "is_dangerous": False, "requires_plan": False, "active_skill": None}
     for attempt in range(2):
         try:
-            response = ollama.chat(
-                model=OLLAMA_MODEL,
-                messages=[
+            from llm_provider import chat_once
+            response = chat_once(
+                [
                     {'role': 'system', 'content': router_prompt},
                     {'role': 'user', 'content': user_input}
                 ],
-                format="json",
-                options=chat_options(num_predict=128 if attempt == 0 else 512),
-                keep_alive=OLLAMA_KEEP_ALIVE
+                response_format="json",
+                num_predict=128 if attempt == 0 else 512,
             )
-            content = response['message']['content'].strip()
+            content = (response.get('content') or '').strip()
             # Small models occasionally wrap JSON in code fences or prose; peel it off.
             if content.startswith("```"):
                 content = content.split("```")[1]
@@ -165,6 +165,37 @@ When the user asks to run a security sweep, check for threats, or monitor securi
 1. Use `discover_smart_devices` if you need to know what devices exist.
 2. If asked to set a scene (e.g. "Movie mode", "Gaming mode"), use `set_smart_scene`.
 3. If a smart device is unreachable or fails, you MUST report this failure to the user clearly. Do not pretend the action succeeded if the tool returns an error.
+
+**Windows UI Automation (UIA) Control:**
+For programmatic and deterministic Windows desktop application control:
+1. Use `list_open_windows()` to inspect running application window titles.
+2. Use `get_window_controls(window_title)` to discover buttons, edits, and menus inside any window.
+3. Use `click_ui_element(window_title, element_name)` to click buttons, tabs, or menu items directly.
+4. Use `set_ui_element_text(window_title, element_name, text)` to enter text into edit fields.
+5. If deterministic UI automation is insufficient or requires complex visual recognition/dragging, fall back to `execute_visual_task`.
+
+**Python Code Execution & Data Visualization:**
+You have access to `execute_python_code(code)`:
+1. Use it for complex mathematical computations, statistical analysis, text parsing, or generating charts with Matplotlib.
+2. If generating charts or plots with Matplotlib (`plt`), plot normally and configure titles/labels. The interpreter automatically saves the figure to `/charts/<filename>.png` and returns the file path.
+3. Code runs in a secure isolated environment with a 20-second timeout.
+
+**Desktop Semantic RAG & Knowledge Search:**
+You have access to a local semantic document search engine:
+1. Use `query_desktop_knowledge(query, top_k=5)` to retrieve relevant excerpts and citations from indexed desktop documents, notes, and code.
+2. Use `index_desktop_directory(directory_path)` if the user asks you to index, ingest, or learn from a folder.
+3. Use `list_indexed_documents()` to see what knowledge files are currently indexed.
+
+**Ambient Context & Active Application Awareness:**
+You have access to `get_ambient_context()`:
+1. Call this tool when the user asks "what am I working on?", "look at my screen", "check what I copied", or needs contextual assistance for their active window.
+2. It returns the active application name, window title, and classified clipboard content (code, error traceback, URL, or text).
+
+**Model Context Protocol (MCP) Standard Tools:**
+You are connected to an extensible MCP ecosystem:
+1. Use `list_mcp_servers()` to view available MCP servers and tools.
+2. Use `call_mcp_tool(server_name, tool_name, arguments)` to invoke a tool on an external MCP server.
+3. Use `reload_mcp_servers()` if the user updates `config/mcp_servers.json`.
 
 Begin by waiting for the initial command from the user. Do not offer unsolicited advice unless specifically asked.
 """
@@ -326,14 +357,11 @@ class AuraAgent:
             tool_call_acc = {}  # stream index -> {"name", "args_str", "dict_args"}
             stats = {}
             try:
+                from llm_provider import stream_chat
                 m_start = time.time()
-                stream = ollama.chat(
-                    model=OLLAMA_MODEL,
-                    messages=self.messages,
+                stream = stream_chat(
+                    self.messages,
                     tools=active_tools if active_tools else None,
-                    options=chat_options(),
-                    keep_alive=OLLAMA_KEEP_ALIVE,
-                    stream=True
                 )
                 for chunk in stream:
                     chunk_msg = chunk.get('message', {})
@@ -350,7 +378,9 @@ class AuraAgent:
                     for tc in chunk_msg.get('tool_calls') or []:
                         fn = tc.get('function', {})
                         idx = tc.get('index', 0)
-                        acc = tool_call_acc.setdefault(idx, {"name": "", "args_str": "", "dict_args": None})
+                        acc = tool_call_acc.setdefault(idx, {"id": None, "name": "", "args_str": "", "dict_args": None})
+                        if tc.get('id') and not acc["id"]:
+                            acc["id"] = tc.get('id')
                         name_frag = fn.get('name')
                         if name_frag:
                             acc["name"] += name_frag
@@ -372,7 +402,7 @@ class AuraAgent:
                     self.ai_telemetry["tokens_per_sec"] = eval_count / (eval_dur_ns / 1e9)
 
             except Exception as e:
-                logging.error(f"Error calling Ollama API: {e}")
+                logging.error(f"Error calling LLM provider API: {e}")
                 msg_dict = {
                     'role': 'assistant',
                     'content': f"I'm sorry, I encountered an internal connection error while processing your request: {e}"
@@ -393,7 +423,10 @@ class AuraAgent:
                         raw_args = {}
                 if not acc["name"]:
                     continue
-                tool_calls.append({"function": {"name": acc["name"], "arguments": raw_args}})
+                tc_obj = {"function": {"name": acc["name"], "arguments": raw_args}}
+                if acc.get("id"):
+                    tc_obj["id"] = acc["id"]
+                tool_calls.append(tc_obj)
 
             msg_dict = {
                 'role': 'assistant',
@@ -404,15 +437,9 @@ class AuraAgent:
             if not msg_dict.get('content') and not tool_calls:
                 logging.warning("Model returned empty response with no tools. Retrying without tools to prevent silence.")
                 try:
-                    retry_response = ollama.chat(
-                        model=OLLAMA_MODEL,
-                        messages=self.messages,
-                        options=chat_options(),
-                        keep_alive=OLLAMA_KEEP_ALIVE
-                        # Intentionally omitting tools=available_tools
-                    )
-                    retry_message = retry_response['message']
-                    msg_dict['content'] = retry_message.get('content') or ''
+                    from llm_provider import chat_once
+                    retry_response = chat_once(self.messages)
+                    msg_dict['content'] = retry_response.get('content') or ''
                     # The blocking transport only sees done.text, but stream
                     # clients should see the retried answer as tokens too.
                     if msg_dict['content']:

@@ -548,6 +548,24 @@
             "id": "1105b026-67d8-4648-a49a-dbf5efd1ab40",
             "timestamp": "2026-11-22T21:46:17.739764",
             "source_context": "Extracted from: Howrah..."
+        },
+        {
+            "layer": "semantic",
+            "category": "geography",
+            "content": "Chhattisgarh is a state in Central India, located in the Deccan Plateau region of India.",
+            "importance": 9,
+            "id": "55b3c0b6-1d55-4775-be1c-30515f509715",
+            "timestamp": "2026-11-24T23:55:42.992331",
+            "source_context": "Extracted from: Chhattisgarh..."
+        },
+        {
+            "layer": "semantic",
+            "category": "location_details",
+            "content": "Chhattisgarh is bordered by Maharashtra, Madhya Pradesh, Jharkhand, Odisha, and Telangana.",
+            "importance": 8,
+            "id": "7a7cb529-d0d7-405c-aa92-5c2370ca76cb",
+            "timestamp": "2026-11-24T23:55:42.992596",
+            "source_context": "Extracted from: Chhattisgarh..."
         }
     ],
     "episodic": [],

@@ -16,14 +16,20 @@ import subprocess
 def get_cpu_info() -> str:
     """Gets detailed CPU information including model, cores, and current utilization."""
     try:
-        if not WMI_AVAILABLE:
-            return "CPU info unavailable: the 'wmi' package is not installed."
-        w = wmi.WMI()
-        cpu_info = w.Win32_Processor()[0]
+        model = platform.processor() or "Unknown CPU"
+        if WMI_AVAILABLE and wmi:
+            try:
+                w = wmi.WMI()
+                procs = w.Win32_Processor()
+                if procs:
+                    model = procs[0].Name.strip()
+            except Exception:
+                pass
+
         usage = psutil.cpu_percent(interval=0.5)
         freq = psutil.cpu_freq()
         
-        info = f"CPU Model: {cpu_info.Name.strip()}\n"
+        info = f"CPU Model: {model}\n"
         info += f"Physical Cores: {psutil.cpu_count(logical=False)} | Logical Processors: {psutil.cpu_count(logical=True)}\n"
         if freq:
             info += f"Current Frequency: {freq.current:.2f} MHz (Max: {freq.max:.2f} MHz)\n"
@@ -35,27 +41,52 @@ def get_cpu_info() -> str:
 def get_gpu_info() -> str:
     """Gets GPU model, utilization, and temperature."""
     try:
-        if not WMI_AVAILABLE:
-            return "GPU info unavailable: the 'wmi' package is not installed."
-        w = wmi.WMI()
         gpu_info = ""
-        for gpu in w.Win32_VideoController():
-            gpu_info += f"GPU Model: {gpu.Name}\n"
-            gpu_info += f"Driver Version: {gpu.DriverVersion}\n"
-        
-        # Try to get nvidia-smi data if it's an NVIDIA card
+        # 1. Try nvidia-smi first for real-time GPU metrics
         try:
-            smi = subprocess.check_output(["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total", "--format=csv,noheader"], text=True)
-            if smi:
-                parts = smi.strip().split(', ')
-                if len(parts) >= 4:
-                    gpu_info += f"Utilization: {parts[0]}\n"
-                    gpu_info += f"Temperature: {parts[1]} C\n"
-                    gpu_info += f"VRAM Used: {parts[2]} / {parts[3]}\n"
-        except subprocess.CalledProcessError:
-            pass # Not an NVIDIA GPU or nvidia-smi not in PATH
-            
-        return gpu_info.strip()
+            import shutil
+            smi_bin = shutil.which("nvidia-smi")
+            if not smi_bin:
+                candidates = [
+                    os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "nvidia-smi.exe"),
+                    os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+                    r"C:\Windows\System32\nvidia-smi.exe",
+                ]
+                for c in candidates:
+                    if os.path.exists(c):
+                        smi_bin = c
+                        break
+            smi_bin = smi_bin or "nvidia-smi"
+            cflags = 0x08000000 if os.name == 'nt' else 0
+            smi = subprocess.check_output(
+                [smi_bin, "--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total", "--format=csv,noheader"],
+                text=True, stderr=subprocess.DEVNULL, timeout=2.0, creationflags=cflags
+            )
+            if smi and smi.strip():
+                parts = [p.strip() for p in smi.strip().split(',')]
+                if len(parts) >= 5:
+                    gpu_info += f"GPU Model: {parts[0]}\n"
+                    gpu_info += f"Utilization: {parts[1]}\n"
+                    gpu_info += f"Temperature: {parts[2]} C\n"
+                    gpu_info += f"VRAM Used: {parts[3]} / {parts[4]}\n"
+        except Exception:
+            pass
+
+        # 2. Augment with Win32_VideoController if WMI is available
+        if WMI_AVAILABLE and wmi:
+            try:
+                w = wmi.WMI()
+                for gpu in w.Win32_VideoController():
+                    if not gpu_info or gpu.Name not in gpu_info:
+                        gpu_info += f"Display Adapter: {gpu.Name}\n"
+                        if getattr(gpu, "DriverVersion", None):
+                            gpu_info += f"Driver Version: {gpu.DriverVersion}\n"
+            except Exception:
+                pass
+
+        if gpu_info.strip():
+            return gpu_info.strip()
+        return "GPU info unavailable: No compatible GPU drivers or sensors detected."
     except Exception as e:
         return f"Error retrieving GPU info: {str(e)}"
 

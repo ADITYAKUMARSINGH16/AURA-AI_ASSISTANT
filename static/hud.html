@@ -6,9 +6,10 @@
     <title>AURA // AI Assistant</title>
     <link rel="icon" type="image/webp" href="logo_small.webp">
     <link rel="stylesheet" href="tokens.css">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20261125">
 </head>
 <body>
+    <a href="#main-content" class="skip-link visually-hidden">Skip to main content</a>
     <!-- ═══════════════ BOOT OVERLAY (signature moment) ═══════════════ -->
     <div id="boot-overlay">
         <div class="boot-content">
@@ -37,10 +38,34 @@
                 </div>
             </div>
             <div class="onboard-footer">
-                <button class="qa-btn primary" id="onboard-enter" disabled>
+                <button type="button" class="qa-btn primary" id="onboard-enter" disabled>
                     <span>Enter the HUD</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════ JARVIS FULLSCREEN VOICE OVERLAY ═══════════════ -->
+    <div class="voice-overlay" id="voice-overlay" role="dialog" aria-modal="true" aria-label="AURA Voice Assistant" hidden>
+        <div class="voice-overlay-backdrop" tabindex="-1"></div>
+        <div class="voice-overlay-container">
+            <button type="button" id="voice-overlay-close" class="voice-overlay-close" aria-label="Close voice overlay (ESC)">
+                <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <div class="voice-overlay-orb-wrap">
+                <div class="voice-overlay-ring ring-outer"></div>
+                <div class="voice-overlay-ring ring-middle"></div>
+                <div class="voice-overlay-ring ring-inner"></div>
+                <div class="voice-overlay-core" id="voice-overlay-core">
+                    <svg class="voice-overlay-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/></svg>
+                </div>
+            </div>
+            <canvas id="voice-overlay-wave" class="voice-overlay-wave" width="400" height="60" aria-hidden="true"></canvas>
+            <div class="voice-overlay-status" id="voice-overlay-status">AURA LISTENING...</div>
+            <div class="voice-overlay-transcript" id="voice-overlay-transcript">"Say a command or ask a question..."</div>
+            <div class="voice-overlay-hints">
+                <span>Press <b>ESC</b> or <b>Ctrl+Space</b> to dismiss</span>
             </div>
         </div>
     </div>
@@ -56,32 +81,32 @@
             </a>
 
             <nav class="side-nav" aria-label="Main navigation">
-                <button class="nav-item active" data-view="chat" aria-pressed="true" title="Chat">
+                <button type="button" class="nav-item active" data-view="chat" aria-pressed="true" title="Chat">
                     <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     <span class="nav-label">Chat</span>
                     <span class="nav-badge" id="chat-plan-badge" hidden></span>
                 </button>
-                <button class="nav-item" data-view="reactor" aria-pressed="false" title="Reactor">
+                <button type="button" class="nav-item" data-view="reactor" aria-pressed="false" title="Reactor">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z"/><path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z"/></svg>
                     <span class="nav-label">Reactor</span>
                 </button>
-                <button class="nav-item" data-view="system" aria-pressed="false" title="System">
+                <button type="button" class="nav-item" data-view="system" aria-pressed="false" title="System">
                     <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
                     <span class="nav-label">System</span>
                 </button>
-                <button class="nav-item" data-view="security" aria-pressed="false" title="Security">
+                <button type="button" class="nav-item" data-view="security" aria-pressed="false" title="Security">
                     <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     <span class="nav-label">Security</span>
                 </button>
-                <button class="nav-item" data-view="files" aria-pressed="false" title="Files">
+                <button type="button" class="nav-item" data-view="files" aria-pressed="false" title="Files">
                     <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                     <span class="nav-label">Files</span>
                 </button>
-                <button class="nav-item" data-view="memory" aria-pressed="false" title="Memory">
+                <button type="button" class="nav-item" data-view="memory" aria-pressed="false" title="Memory">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
                     <span class="nav-label">Memory</span>
                 </button>
-                <button class="nav-item" data-view="settings" aria-pressed="false" title="Settings">
+                <button type="button" class="nav-item" data-view="settings" aria-pressed="false" title="Settings">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     <span class="nav-label">Settings</span>
                 </button>
@@ -100,62 +125,127 @@
         <div class="hud-main">
 
             <header class="topbar">
-                <button class="btn-menu" id="btn-menu" aria-label="Toggle navigation" aria-expanded="false">
+                <button type="button" class="btn-menu" id="btn-menu" aria-label="Toggle navigation" aria-expanded="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
                 </button>
                 <h1 class="view-title" id="view-title">Chat</h1>
                 <div class="topbar-right">
-                    <span class="signal-pill mono" id="hud-signal" title="Wi-Fi uplink">--------</span>
-                    <button id="notif-bell" class="icon-btn" role="button" aria-label="Notifications" tabindex="0">
+                    <button type="button" id="btn-spotlight" class="spotlight-trigger" title="Command Palette (Ctrl+K)" aria-label="Open command palette">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                        <span class="spotlight-label">PALETTE</span>
+                        <span class="spotlight-hint"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+                    </button>
+                    <span class="latency-pill mono" id="hud-latency" title="System response latency">--ms</span>
+                    <span class="signal-pill mono" id="hud-signal" title="Wi-Fi uplink">
+                        <span class="signal-bars" aria-hidden="true">
+                            <span class="signal-bar bar-1"></span>
+                            <span class="signal-bar bar-2"></span>
+                            <span class="signal-bar bar-3"></span>
+                            <span class="signal-bar bar-4"></span>
+                        </span>
+                        <span id="hud-signal-text">--%</span>
+                    </span>
+                    <button type="button" id="btn-audio-sfx" class="icon-btn" title="Toggle UI sound effects" aria-label="Toggle audio effects">
+                        <svg id="sfx-icon-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                        <svg id="sfx-icon-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                    </button>
+                    <button type="button" id="notif-bell" class="icon-btn" aria-label="Notifications">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                             <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                         </svg>
                         <span id="notif-badge" class="notif-badge">0</span>
                     </button>
-                    <button id="btn-shortcuts" class="icon-btn" title="Keyboard shortcuts (?)">
+                    <button type="button" id="btn-shortcuts" class="icon-btn" title="Keyboard shortcuts (?)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
                     </button>
                 </div>
             </header>
 
-            <main class="views">
+            <main class="views" id="main-content" tabindex="-1">
 
                 <!-- ══════════ VIEW: CHAT (home) ══════════ -->
                 <section class="view active" id="view-chat" data-title="Chat">
                     <div class="chat-layout">
 
                         <div class="console-card card">
-                            <div class="mode-toggle" role="group" aria-label="Console mode">
-                                <button type="button" class="mode-btn active" id="btn-mode-term" aria-pressed="true">Terminal</button>
-                                <button type="button" class="mode-btn" id="btn-mode-chat" aria-pressed="false">Chat</button>
+                            <div class="console-top-bar">
+                                <div class="mode-toggle" role="group" aria-label="Console mode">
+                                    <button type="button" class="mode-btn active" id="btn-mode-term" aria-pressed="true">Terminal</button>
+                                    <button type="button" class="mode-btn" id="btn-mode-chat" aria-pressed="false">Chat</button>
+                                </div>
+                                <div class="console-actions">
+                                    <button type="button" class="qa-btn compact canvas-toggle-btn" id="btn-toggle-canvas" title="Toggle Artifact Workspace Canvas (Alt+C)" aria-pressed="false">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+                                        <span>CANVAS</span>
+                                    </button>
+                                </div>
                             </div>
 
-                            <div id="terminal-output" role="log" aria-live="polite" class="console-output terminal-mode">
-                                <div>> initializing aura core ........... ok</div>
-                                <div>> neural mesh handshake ........... ok</div>
-                                <div>> sensor array calibrated ......... ok</div>
-                                <div>> voice interface online .......... ok</div>
-                                <div>> awaiting operator command</div>
-                            </div>
+                            <div class="chat-viewport-split" id="chat-viewport-split">
+                                <div class="chat-stream-pane" id="chat-stream-pane">
+                                    <div id="terminal-output" role="log" aria-live="polite" class="console-output terminal-mode">
+                                        <div>> initializing aura core ........... ok</div>
+                                        <div>> neural mesh handshake ........... ok</div>
+                                        <div>> sensor array calibrated ......... ok</div>
+                                        <div>> voice interface online .......... ok</div>
+                                        <div>> awaiting operator command</div>
+                                    </div>
 
-                            <div id="chat-output" role="log" aria-live="polite" aria-label="AURA conversation" class="console-output chat-mode">
-                                <!-- Chat bubbles injected here -->
+                                    <div id="chat-output" role="log" aria-live="polite" aria-label="AURA conversation" class="console-output chat-mode">
+                                        <!-- Chat bubbles injected here -->
+                                    </div>
+                                </div>
+
+                                <div class="workspace-canvas-pane" id="workspace-canvas-pane" hidden>
+                                    <div class="canvas-header">
+                                        <div class="canvas-title-wrap">
+                                            <span class="canvas-icon">📄</span>
+                                            <span class="canvas-title" id="canvas-title">Artifact Workspace</span>
+                                        </div>
+                                        <div class="canvas-actions">
+                                            <button type="button" class="qa-btn compact" id="canvas-copy-btn" title="Copy artifact content">COPY</button>
+                                            <button type="button" class="qa-btn compact" id="canvas-close-btn" title="Close canvas">✕</button>
+                                        </div>
+                                    </div>
+                                    <div class="canvas-body" id="canvas-body">
+                                        <div class="canvas-empty-state">
+                                            <div class="canvas-empty-glyph">◫</div>
+                                            <div class="canvas-empty-title">Artifact & Code Canvas</div>
+                                            <div class="canvas-empty-subtitle">Generated reports, code files, diffs, and diagrams appear here.</div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div id="attachment-preview" class="attachment-preview"></div>
 
+                            <div id="ambient-bar" class="ambient-bar">
+                                <span class="ambient-dot" aria-hidden="true"></span>
+                                <span id="ambient-app-text" class="ambient-app-text">Active: Desktop</span>
+                                <span id="ambient-clip-badge" class="ambient-clip-badge">CLIPBOARD</span>
+                                <div id="ambient-suggestions" class="ambient-suggestions"></div>
+                            </div>
+
                             <div class="quick-actions" aria-label="Quick actions"></div>
 
                             <div class="input-row">
-                                <button id="btn-attach" class="icon-btn input-icon" title="Attach file or image">
+                                <div class="slash-popup" id="slash-popup" hidden role="listbox" aria-label="Slash commands">
+                                    <div class="slash-item" data-cmd="/search "><span class="slash-name">/search</span><span class="slash-desc">Query live web intelligence</span></div>
+                                    <div class="slash-item" data-cmd="/security"><span class="slash-name">/security</span><span class="slash-desc">Run security & port anomaly scan</span></div>
+                                    <div class="slash-item" data-cmd="/plan "><span class="slash-name">/plan</span><span class="slash-desc">Generate autonomous multi-step plan</span></div>
+                                    <div class="slash-item" data-cmd="/theme "><span class="slash-name">/theme</span><span class="slash-desc">Switch HUD theme (cyan, amber, crimson...)</span></div>
+                                    <div class="slash-item" data-cmd="/voice"><span class="slash-name">/voice</span><span class="slash-desc">Open fullscreen voice space</span></div>
+                                    <div class="slash-item" data-cmd="/clear"><span class="slash-name">/clear</span><span class="slash-desc">Clear console & chat output</span></div>
+                                </div>
+                                <button type="button" id="btn-attach" class="icon-btn input-icon" title="Attach file or image">
                                     <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
                                     </svg>
                                 </button>
                                 <input type="file" id="file-upload" accept="image/*,.txt,.md,.py,.json,.csv,.js,.css,.html" multiple style="display: none;">
                                 <input type="text" id="command-input" aria-label="Message AURA" aria-autocomplete="list" placeholder="Message AURA…" autocomplete="off">
-                                <button id="voice-btn" aria-label="Activate voice input" aria-pressed="false" class="voice-orb state-idle" title="Voice input (Ctrl+M)">
+                                <button type="button" id="voice-btn" aria-label="Activate voice input" aria-pressed="false" class="voice-orb state-idle" title="Voice input (Ctrl+M)">
                                     <span class="orb-ring ring-a" aria-hidden="true"></span>
                                     <span class="orb-ring ring-b" aria-hidden="true"></span>
                                     <svg class="orb-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/></svg>
@@ -172,7 +262,7 @@
                                         <span class="plan-pulse" id="plan-pulse" hidden></span>
                                         <span>Active Plan</span>
                                     </span>
-                                    <button class="plan-cancel" id="btn-plan-cancel" title="Cancel active plan" aria-label="Cancel active plan" hidden>×</button>
+                                    <button type="button" class="plan-cancel" id="btn-plan-cancel" title="Cancel active plan" aria-label="Cancel active plan" hidden>×</button>
                                 </div>
                                 <div class="plan-empty" id="plan-empty">No active plan</div>
                                 <div id="plan-body" hidden>
@@ -193,7 +283,7 @@
                                 <div class="schedule-add">
                                     <input type="text" id="sched-time" placeholder="HH:MM" maxlength="5">
                                     <input type="text" id="sched-event" placeholder="Reminder…">
-                                    <button class="qa-btn compact" id="btn-add-sched">ADD</button>
+                                    <button type="button" class="qa-btn compact" id="btn-add-sched">ADD</button>
                                 </div>
                             </div>
 
@@ -214,9 +304,9 @@
                                         <div class="media-progress-fill" id="media-progress-fill"></div>
                                     </div>
                                     <div class="spotify-controls" id="media-controls">
-                                        <button class="sp-btn" id="sp-prev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
-                                        <button class="sp-btn" id="sp-play" aria-label="Play / pause"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
-                                        <button class="sp-btn" id="sp-next" aria-label="Next track"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+                                        <button type="button" class="sp-btn" id="sp-prev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+                                        <button type="button" class="sp-btn" id="sp-play" aria-label="Play / pause"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+                                        <button type="button" class="sp-btn" id="sp-next" aria-label="Next track"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
                                     </div>
                                     <div class="media-hint" id="media-hint" hidden></div>
                                 </div>
@@ -235,6 +325,11 @@
                                 <canvas id="reactor-canvas" aria-hidden="true"></canvas>
                                 <div class="reactor-status" id="reactor-status" aria-live="polite">ONLINE</div>
                             </div>
+                        </div>
+                        <div class="reactor-mode-selector" role="group" aria-label="Visualizer Mode">
+                            <button type="button" class="qa-btn compact active" id="btn-vis-reactor" data-mode="reactor">REACTOR</button>
+                            <button type="button" class="qa-btn compact" id="btn-vis-hologram" data-mode="hologram">3D HOLOGRAM</button>
+                            <button type="button" class="qa-btn compact" id="btn-vis-oscilloscope" data-mode="oscilloscope">SPECTRUM</button>
                         </div>
                         <div class="reactor-caption">TALK TO AURA</div>
                     </div>
@@ -284,6 +379,7 @@
                             </div>
                             <div class="diag-item">
                                 <div class="diag-label"><span>GPU fan</span><span id="gpu-fan-val">AUTO</span></div>
+                                <div class="diag-bar"><div class="diag-fill" id="gpu-fan-fill"></div></div>
                             </div>
                         </div>
 
@@ -341,10 +437,10 @@
                                 <span>System Logs</span>
                                 <div class="log-actions" style="display: flex; gap: 8px; align-items: center;">
                                     <div class="log-toggle-group" style="display: flex; gap: 4px;">
-                                        <button class="qa-btn compact active" id="btn-log-server" data-source="server" title="Server runtime & console logs">SERVER</button>
-                                        <button class="qa-btn compact" id="btn-log-agent" data-source="agent" title="Agent reasoning & tool logs">AGENT</button>
+                                        <button type="button" class="qa-btn compact active" id="btn-log-server" data-source="server" title="Server runtime & console logs">SERVER</button>
+                                        <button type="button" class="qa-btn compact" id="btn-log-agent" data-source="agent" title="Agent reasoning & tool logs">AGENT</button>
                                     </div>
-                                    <button class="qa-btn compact" id="btn-log-refresh" title="Refresh logs">REFRESH</button>
+                                    <button type="button" class="qa-btn compact" id="btn-log-refresh" title="Refresh logs">REFRESH</button>
                                 </div>
                             </div>
                             <div class="log-output" id="log-output"></div>
@@ -360,7 +456,7 @@
                         <div class="card security-panel">
                             <div class="card-header">
                                 <span>Local Security Center</span>
-                                <button class="qa-btn compact" id="btn-sec-refresh">REFRESH</button>
+                                <button type="button" class="qa-btn compact" id="btn-sec-refresh">REFRESH</button>
                             </div>
                             <div class="threat-row" id="threat-box">
                                 <div class="threat-block">
@@ -394,7 +490,7 @@
                         <div class="card network-panel">
                             <div class="card-header">
                                 <span>Network Grid</span>
-                                <button class="qa-btn compact" id="btn-net-scan">SCAN</button>
+                                <button type="button" class="qa-btn compact" id="btn-net-scan">SCAN</button>
                             </div>
                             <div class="network-canvas-container">
                                 <svg id="network-svg"></svg>
@@ -406,6 +502,14 @@
                             <div class="webcam-container">
                                 <video id="webcam-video" autoplay muted playsinline></video>
                                 <canvas id="webcam-canvas"></canvas>
+                                <div class="webcam-hud-overlay">
+                                    <div class="hud-crosshair-center"></div>
+                                    <div class="hud-target-corner tl"></div>
+                                    <div class="hud-target-corner tr"></div>
+                                    <div class="hud-target-corner bl"></div>
+                                    <div class="hud-target-corner br"></div>
+                                    <div class="hud-target-label">OPTICAL_TARGETING // ACTIVE</div>
+                                </div>
                                 <div class="webcam-offline" id="webcam-offline">Camera inactive</div>
                             </div>
                         </div>
@@ -420,7 +524,7 @@
                         <div class="card fs-panel">
                             <div class="card-header"><span>File Explorer</span></div>
                             <div class="fs-controls">
-                                <button id="fs-up-btn" class="qa-btn compact">UP</button>
+                                <button type="button" id="fs-up-btn" class="qa-btn compact">UP</button>
                                 <div id="fs-path" class="fs-path">ROOT</div>
                             </div>
                             <div class="fs-list" id="fs-list"></div>
@@ -450,27 +554,503 @@
 
                 <!-- ══════════ VIEW: SETTINGS ══════════ -->
                 <section class="view" id="view-settings" data-title="Settings">
+                    <div class="settings-nav-bar" role="tablist" aria-label="Settings categories">
+                        <button type="button" class="settings-tab active" data-cat="all" role="tab" aria-selected="true">ALL SETTINGS</button>
+                        <button type="button" class="settings-tab" data-cat="ai" role="tab" aria-selected="false">AI &amp; MODELS</button>
+                        <button type="button" class="settings-tab" data-cat="audio" role="tab" aria-selected="false">AUDIO &amp; VOICE</button>
+                        <button type="button" class="settings-tab" data-cat="ui" role="tab" aria-selected="false">INTERFACE</button>
+                        <button type="button" class="settings-tab" data-cat="env" role="tab" aria-selected="false">.ENV &amp; SYSTEM</button>
+                    </div>
+
                     <div class="card-grid">
 
-                        <div class="card">
+                        <div class="card" data-cat="ui">
                             <div class="card-header"><span>Appearance</span></div>
                             <p class="settings-hint">Accent theme used across the interface.</p>
                             <div class="theme-selector">
                                 <button type="button" class="theme-dot theme-dot-default" data-theme="" aria-label="Default cyan theme" aria-pressed="true"></button>
+                                <button type="button" class="theme-dot theme-dot-amber" data-theme="theme-amber" aria-label="Amber theme" aria-pressed="false"></button>
                                 <button type="button" class="theme-dot theme-dot-crimson" data-theme="theme-crimson" aria-label="Crimson theme" aria-pressed="false"></button>
                                 <button type="button" class="theme-dot theme-dot-emerald" data-theme="theme-emerald" aria-label="Emerald theme" aria-pressed="false"></button>
                                 <button type="button" class="theme-dot theme-dot-violet" data-theme="theme-violet" aria-label="Violet theme" aria-pressed="false"></button>
                             </div>
                         </div>
 
-<div class="card modules-panel">
+                        <!-- ── AI & Reasoning Models (.env) ── -->
+                        <div class="card llm-settings-card" data-cat="ai">
+                            <div class="card-header"><span>AI Reasoning &amp; Vision Models (.env)</span></div>
+                            <p class="settings-hint">Select active AI provider (Local Ollama or Cloud API) and Ollama runtime parameters.</p>
+                            <div class="module-item">
+                                <span>Active AI Provider</span>
+                                <div class="env-input-wrap">
+                                    <select id="env-llm-provider" class="voice-select-dropdown" aria-label="Active LLM Provider">
+                                        <option value="ollama" selected>Ollama (Local Offline)</option>
+                                        <option value="groq">Groq Cloud (Fast Inference)</option>
+                                        <option value="nvidia">NVIDIA NIM (Build API)</option>
+                                        <option value="gemini">Google Gemini</option>
+                                        <option value="openai">OpenAI / ChatGPT</option>
+                                        <option value="openrouter">OpenRouter (Multi-Model Gateway)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="module-item">
+                                <span>Ollama Reasoning Model</span>
+                                <div class="env-input-wrap">
+                                    <select id="env-ollama-model" class="voice-select-dropdown" aria-label="Ollama Model">
+                                        <option value="gemma4:e2b">gemma4:e2b (Default)</option>
+                                    </select>
+                                    <input type="text" id="env-ollama-model-custom" class="setting-text-input env-custom-field" placeholder="Custom Ollama model..." aria-label="Custom Ollama model" style="display:none;margin-top:6px;">
+                                </div>
+                            </div>
+                            <div class="module-item">
+                                <span>Vision Model (Images &amp; Screenshots)</span>
+                                <div class="env-input-wrap">
+                                    <select id="env-vision-model" class="voice-select-dropdown" aria-label="Ollama Vision Model">
+                                        <option value="qwen3-vl:4b">qwen3-vl:4b (Default)</option>
+                                    </select>
+                                    <input type="text" id="env-vision-model-custom" class="setting-text-input env-custom-field" placeholder="Custom vision model..." aria-label="Custom vision model" style="display:none;margin-top:6px;">
+                                </div>
+                            </div>
+                            <div class="settings-two-col">
+                                <div class="module-item">
+                                    <span>Context Window</span>
+                                    <select id="env-num-ctx" class="voice-select-dropdown" aria-label="Context Window">
+                                        <option value="2048">2,048 tokens (Low VRAM)</option>
+                                        <option value="4096">4,096 tokens</option>
+                                        <option value="8192" selected>8,192 tokens (Balanced)</option>
+                                        <option value="16384">16,384 tokens</option>
+                                        <option value="32768">32,768 tokens</option>
+                                        <option value="65536">65,536 tokens</option>
+                                        <option value="131072">131,072 tokens</option>
+                                    </select>
+                                </div>
+                                <div class="module-item">
+                                    <span>Keep Alive</span>
+                                    <select id="env-keep-alive" class="voice-select-dropdown" aria-label="Ollama Keep Alive">
+                                        <option value="0">0 (Unload immediately)</option>
+                                        <option value="2m">2m (2 minutes)</option>
+                                        <option value="5m" selected>5m (5 minutes)</option>
+                                        <option value="10m">10m (10 minutes)</option>
+                                        <option value="30m">30m (30 minutes)</option>
+                                        <option value="1h">1h (1 hour)</option>
+                                        <option value="-1">-1 (Keep loaded forever)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="module-item">
+                                <span>Intent Router Pre-classifier</span>
+                                <select id="env-intent-router" class="voice-select-dropdown" aria-label="Intent Router">
+                                    <option value="on" selected>On (Fast intent classification)</option>
+                                    <option value="off">Off (Direct full toolset)</option>
+                                </select>
+                            </div>
+                            <div class="voice-actions-row">
+                                <button type="button" class="qa-btn compact primary" id="btn-save-llm-env">SAVE TO .ENV</button>
+                            </div>
+                        </div>
+
+                        <!-- ── Cloud AI API Keys & Models (.env) ── -->
+                        <div class="card cloud-keys-card span-2" data-cat="ai">
+                            <div class="card-header">
+                                <span>Cloud AI API Keys &amp; Models (.env)</span>
+                                <div class="env-header-badge">GROQ · NVIDIA · GEMINI · CHATGPT · OPENROUTER</div>
+                            </div>
+                            <p class="settings-hint">Add your custom API keys (stored locally in .env). Entering a key or clicking TEST automatically searches live models.</p>
+                            <div class="cloud-provider-grid">
+                                <div class="cloud-provider-block" data-provider="groq">
+                                    <div class="cloud-provider-head">
+                                        <span class="cloud-provider-title">Groq Cloud</span>
+                                        <span class="provider-status-pill" id="provider-status-groq">KEY OPTIONAL</span>
+                                    </div>
+                                    <div class="secret-input-group">
+                                        <input type="password" id="env-groq-api-key" class="setting-text-input" placeholder="gsk_..." autocomplete="off" aria-label="Groq API Key">
+                                        <button type="button" class="qa-btn compact btn-toggle-secret" data-target="env-groq-api-key" title="Show/Hide API Key" aria-label="Show Groq API Key" aria-pressed="false">SHOW</button>
+                                        <button type="button" class="qa-btn compact btn-test-provider" data-provider="groq">TEST</button>
+                                    </div>
+                                    <div class="cloud-model-row">
+                                        <input type="search" id="env-groq-model-search" class="setting-text-input cloud-model-search" placeholder="Search Groq models..." autocomplete="off" aria-label="Search Groq models">
+                                        <select id="env-groq-model" class="voice-select-dropdown" aria-label="Groq Model">
+                                            <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                                            <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                                            <option value="meta-llama/llama-4-scout-17b-16e-instruct">meta-llama/llama-4-scout-17b-16e-instruct</option>
+                                            <option value="qwen/qwen3-32b">qwen/qwen3-32b</option>
+                                            <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+                                        </select>
+                                        <input type="text" id="env-groq-model-custom" class="setting-text-input env-custom-field" placeholder="Custom Groq model..." style="display:none;margin-top:6px;">
+                                    </div>
+                                </div>
+
+                                <div class="cloud-provider-block" data-provider="nvidia">
+                                    <div class="cloud-provider-head">
+                                        <span class="cloud-provider-title">NVIDIA NIM</span>
+                                        <span class="provider-status-pill" id="provider-status-nvidia">KEY OPTIONAL</span>
+                                    </div>
+                                    <div class="secret-input-group">
+                                        <input type="password" id="env-nvidia-api-key" class="setting-text-input" placeholder="nvapi-..." autocomplete="off" aria-label="NVIDIA API Key">
+                                        <button type="button" class="qa-btn compact btn-toggle-secret" data-target="env-nvidia-api-key" title="Show/Hide API Key" aria-label="Show NVIDIA API Key" aria-pressed="false">SHOW</button>
+                                        <button type="button" class="qa-btn compact btn-test-provider" data-provider="nvidia">TEST</button>
+                                    </div>
+                                    <div class="cloud-model-row">
+                                        <input type="search" id="env-nvidia-model-search" class="setting-text-input cloud-model-search" placeholder="Search NVIDIA models..." autocomplete="off" aria-label="Search NVIDIA models">
+                                        <select id="env-nvidia-model" class="voice-select-dropdown" aria-label="NVIDIA Model">
+                                            <option value="meta/llama-3.3-70b-instruct">meta/llama-3.3-70b-instruct</option>
+                                            <option value="nvidia/llama-3.1-nemotron-ultra-253b-v1">nvidia/llama-3.1-nemotron-ultra-253b-v1</option>
+                                            <option value="qwen/qwen2.5-72b-instruct">qwen/qwen2.5-72b-instruct</option>
+                                            <option value="deepseek-ai/deepseek-r1">deepseek-ai/deepseek-r1</option>
+                                            <option value="mistralai/mistral-large-2-instruct">mistralai/mistral-large-2-instruct</option>
+                                        </select>
+                                        <input type="text" id="env-nvidia-model-custom" class="setting-text-input env-custom-field" placeholder="Custom NVIDIA model..." style="display:none;margin-top:6px;">
+                                    </div>
+                                </div>
+
+                                <div class="cloud-provider-block" data-provider="gemini">
+                                    <div class="cloud-provider-head">
+                                        <span class="cloud-provider-title">Google Gemini</span>
+                                        <span class="provider-status-pill" id="provider-status-gemini">KEY OPTIONAL</span>
+                                    </div>
+                                    <div class="secret-input-group">
+                                        <input type="password" id="env-gemini-api-key" class="setting-text-input" placeholder="AIza..." autocomplete="off" aria-label="Gemini API Key">
+                                        <button type="button" class="qa-btn compact btn-toggle-secret" data-target="env-gemini-api-key" title="Show/Hide API Key" aria-label="Show Gemini API Key" aria-pressed="false">SHOW</button>
+                                        <button type="button" class="qa-btn compact btn-test-provider" data-provider="gemini">TEST</button>
+                                    </div>
+                                    <div class="cloud-model-row">
+                                        <input type="search" id="env-gemini-model-search" class="setting-text-input cloud-model-search" placeholder="Search Gemini models..." autocomplete="off" aria-label="Search Gemini models">
+                                        <select id="env-gemini-model" class="voice-select-dropdown" aria-label="Gemini Model">
+                                            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                                            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                                        </select>
+                                        <input type="text" id="env-gemini-model-custom" class="setting-text-input env-custom-field" placeholder="Custom Gemini model..." style="display:none;margin-top:6px;">
+                                    </div>
+                                </div>
+
+                                <div class="cloud-provider-block" data-provider="openai">
+                                    <div class="cloud-provider-head">
+                                        <span class="cloud-provider-title">OpenAI / ChatGPT</span>
+                                        <span class="provider-status-pill" id="provider-status-openai">KEY OPTIONAL</span>
+                                    </div>
+                                    <div class="secret-input-group">
+                                        <input type="password" id="env-openai-api-key" class="setting-text-input" placeholder="sk-..." autocomplete="off" aria-label="OpenAI API Key">
+                                        <button type="button" class="qa-btn compact btn-toggle-secret" data-target="env-openai-api-key" title="Show/Hide API Key" aria-label="Show OpenAI API Key" aria-pressed="false">SHOW</button>
+                                        <button type="button" class="qa-btn compact btn-test-provider" data-provider="openai">TEST</button>
+                                    </div>
+                                    <div class="cloud-model-row">
+                                        <input type="search" id="env-openai-model-search" class="setting-text-input cloud-model-search" placeholder="Search OpenAI models..." autocomplete="off" aria-label="Search OpenAI models">
+                                        <select id="env-openai-model" class="voice-select-dropdown" aria-label="OpenAI Model">
+                                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                            <option value="gpt-4o">gpt-4o</option>
+                                            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                                            <option value="gpt-4.1">gpt-4.1</option>
+                                            <option value="o4-mini">o4-mini</option>
+                                        </select>
+                                        <input type="text" id="env-openai-model-custom" class="setting-text-input env-custom-field" placeholder="Custom OpenAI model..." style="display:none;margin-top:6px;">
+                                    </div>
+                                </div>
+
+                                <div class="cloud-provider-block" data-provider="openrouter">
+                                    <div class="cloud-provider-head">
+                                        <span class="cloud-provider-title">OpenRouter</span>
+                                        <span class="provider-status-pill" id="provider-status-openrouter">KEY OPTIONAL</span>
+                                    </div>
+                                    <div class="secret-input-group">
+                                        <input type="password" id="env-openrouter-api-key" class="setting-text-input" placeholder="sk-or-v1-..." autocomplete="off" aria-label="OpenRouter API Key">
+                                        <button type="button" class="qa-btn compact btn-toggle-secret" data-target="env-openrouter-api-key" title="Show/Hide API Key" aria-label="Show OpenRouter API Key" aria-pressed="false">SHOW</button>
+                                        <button type="button" class="qa-btn compact btn-test-provider" data-provider="openrouter">TEST</button>
+                                    </div>
+                                    <div class="cloud-model-row">
+                                        <input type="search" id="env-openrouter-model-search" class="setting-text-input cloud-model-search" placeholder="Search OpenRouter models..." autocomplete="off" aria-label="Search OpenRouter models">
+                                        <select id="env-openrouter-model" class="voice-select-dropdown" aria-label="OpenRouter Model">
+                                            <option value="openai/gpt-4o-mini">openai/gpt-4o-mini</option>
+                                            <option value="anthropic/claude-sonnet-4">anthropic/claude-sonnet-4</option>
+                                            <option value="google/gemini-2.5-flash">google/gemini-2.5-flash</option>
+                                            <option value="deepseek/deepseek-chat-v3-0324:free">deepseek/deepseek-chat-v3-0324:free</option>
+                                            <option value="meta-llama/llama-3.3-70b-instruct:free">meta-llama/llama-3.3-70b-instruct:free</option>
+                                            <option value="openrouter/auto">openrouter/auto</option>
+                                        </select>
+                                        <input type="text" id="env-openrouter-model-custom" class="setting-text-input env-custom-field" placeholder="Custom OpenRouter model..." style="display:none;margin-top:6px;">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="voice-actions-row">
+                                <button type="button" class="qa-btn compact primary" id="btn-save-cloud-env">SAVE API KEYS &amp; MODELS TO .ENV</button>
+                            </div>
+                        </div>
+
+                        <!-- ── Voice Synthesis (.env) ── -->
+                        <div class="card voice-settings-card" data-cat="audio">
+                            <div class="card-header"><span>Voice Synthesis (Neural Engine)</span></div>
+                            <p class="settings-hint">Ultra-realistic conversational human neural voices and TTS backend.</p>
+                            <div class="module-item">
+                                <span>TTS Backend Engine</span>
+                                <select id="env-tts-backend" class="voice-select-dropdown" aria-label="TTS Backend Engine">
+                                    <option value="edge" selected>Edge TTS (Cloud Neural - Free, High Fidelity)</option>
+                                    <option value="kokoro">Kokoro TTS (100% Offline Local Neural)</option>
+                                </select>
+                            </div>
+                            <div class="module-item">
+                                <span>Voice Model</span>
+                                <select id="tts-voice-select" class="voice-select-dropdown" aria-label="Neural Voice Model">
+                                    <option value="en-US-AvaNeural" selected>Ava (Conversational Female - Ultra-Realistic)</option>
+                                    <option value="en-US-AndrewNeural">Andrew (Conversational Male - Natural &amp; Warm)</option>
+                                    <option value="en-US-EmmaNeural">Emma (Expressive Natural Female)</option>
+                                    <option value="en-US-JennyNeural">Jenny (Friendly American Female)</option>
+                                    <option value="en-US-BrianNeural">Brian (Articulate American Male)</option>
+                                    <option value="en-US-GuyNeural">Guy (Casual American Male)</option>
+                                    <option value="en-GB-SoniaNeural">Sonia (British Female - Jarvis/Friday)</option>
+                                    <option value="en-GB-RyanNeural">Ryan (Intellectual British Male)</option>
+                                    <option value="en-US-AriaNeural">Aria (Classic Tactical Assistant)</option>
+                                    <option value="en-IN-NeerjaNeural">Neerja (Natural Indian English Female)</option>
+                                    <option value="en-IN-PrabhatNeural">Prabhat (Natural Indian English Male)</option>
+                                </select>
+                            </div>
+                            <div class="diag-item slider-item" style="margin-top: 8px;">
+                                <div class="diag-label"><span>Speech Pace</span><span id="tts-rate-val">Normal (+0%)</span></div>
+                                <input type="range" id="tts-rate-slider" min="-20" max="20" step="5" value="0" aria-label="Speech pace">
+                            </div>
+                            <div class="voice-actions-row">
+                                <button type="button" class="qa-btn compact accent-text" id="btn-preview-voice">▶ PREVIEW VOICE</button>
+                                <button type="button" class="qa-btn compact primary" id="btn-save-voice">SAVE PREFERENCE (TO .ENV)</button>
+                            </div>
+                        </div>
+
+                        <!-- ── Speech-to-Text & Wake Word (.env) ── -->
+                        <div class="card stt-settings-card" data-cat="audio">
+                            <div class="card-header"><span>Speech-to-Text &amp; Wake Word (.env)</span></div>
+                            <p class="settings-hint">Configure offline speech transcription and openWakeWord sensitivity.</p>
+                            <div class="settings-two-col">
+                                <div class="module-item">
+                                    <span>STT Backend</span>
+                                    <select id="env-stt-backend" class="voice-select-dropdown" aria-label="STT Backend">
+                                        <option value="local" selected>local (faster-whisper offline)</option>
+                                        <option value="cloud">cloud (Google SpeechRecognition)</option>
+                                    </select>
+                                </div>
+                                <div class="module-item">
+                                    <span>Whisper Model</span>
+                                    <select id="env-stt-model" class="voice-select-dropdown" aria-label="Whisper Model">
+                                        <option value="tiny.en" selected>tiny.en (~39M, Fastest English)</option>
+                                        <option value="tiny">tiny (~39M, Multilingual)</option>
+                                        <option value="base.en">base.en (~74M, Balanced English)</option>
+                                        <option value="base">base (~74M, Multilingual)</option>
+                                        <option value="small.en">small.en (~244M, Accurate English)</option>
+                                        <option value="small">small (~244M, Multilingual)</option>
+                                        <option value="medium.en">medium.en (~769M, High Accuracy)</option>
+                                        <option value="medium">medium (~769M, Multilingual)</option>
+                                        <option value="large-v3">large-v3 (~1.55B, Maximum)</option>
+                                        <option value="turbo">turbo (~809M, Fast Accurate)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="settings-two-col">
+                                <div class="module-item">
+                                    <span>STT Device</span>
+                                    <select id="env-stt-device" class="voice-select-dropdown" aria-label="STT Device">
+                                        <option value="auto" selected>auto (CUDA / CPU)</option>
+                                        <option value="cuda">cuda (NVIDIA GPU)</option>
+                                        <option value="cpu">cpu (CPU Only)</option>
+                                    </select>
+                                </div>
+                                <div class="module-item">
+                                    <span>Compute Type</span>
+                                    <select id="env-stt-compute-type" class="voice-select-dropdown" aria-label="STT Compute Type">
+                                        <option value="auto" selected>auto (float16 CUDA / int8 CPU)</option>
+                                        <option value="default">default (CTranslate2 default)</option>
+                                        <option value="int8">int8 (Fastest CPU)</option>
+                                        <option value="float16">float16 (GPU Half Precision)</option>
+                                        <option value="int8_float16">int8_float16 (Low-VRAM GPU)</option>
+                                        <option value="float32">float32 (Full Precision)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="settings-two-col">
+                                <div class="module-item">
+                                    <span>Wake Word Model</span>
+                                    <select id="env-wakeword-model" class="voice-select-dropdown" aria-label="Wake Word Model">
+                                        <option value="models/hey_aura.onnx" selected>models/hey_aura.onnx</option>
+                                    </select>
+                                </div>
+                                <div class="module-item">
+                                    <span>Microphone Device</span>
+                                    <select id="env-wakeword-device" class="voice-select-dropdown" aria-label="Microphone Input Device">
+                                        <option value="" selected>System Default Microphone</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="diag-item slider-item" style="margin-top: 8px;">
+                                <div class="diag-label"><span>Wake Word Sensitivity</span><span id="env-wakeword-thresh-val">0.60</span></div>
+                                <input type="range" id="env-wakeword-thresh-slider" min="30" max="95" step="5" value="60" aria-label="Wake word sensitivity">
+                            </div>
+                            <div class="diag-item slider-item" style="margin-top: 8px;">
+                                <div class="diag-label"><span>Barge-in Threshold (Speaking Guard)</span><span id="env-speaking-thresh-val">0.85</span></div>
+                                <input type="range" id="env-speaking-thresh-slider" min="50" max="95" step="5" value="85" aria-label="Barge-in threshold">
+                            </div>
+                            <div class="settings-two-col">
+                                <div class="module-item">
+                                    <span>Cooldown (Seconds)</span>
+                                    <select id="env-wakeword-cooldown" class="voice-select-dropdown" aria-label="Wake Word Cooldown">
+                                        <option value="0.5">0.5s</option>
+                                        <option value="1.0">1.0s</option>
+                                        <option value="1.5">1.5s</option>
+                                        <option value="2.0" selected>2.0s (Default)</option>
+                                        <option value="3.0">3.0s</option>
+                                        <option value="3.5">3.5s</option>
+                                        <option value="5.0">5.0s</option>
+                                    </select>
+                                </div>
+                                <div class="module-item">
+                                    <span>Persistence (Chunks)</span>
+                                    <select id="env-wakeword-persistence" class="voice-select-dropdown" aria-label="Wake Word Persistence">
+                                        <option value="1">1 chunk (Instant)</option>
+                                        <option value="2">2 chunks (Fast)</option>
+                                        <option value="3" selected>3 chunks (Default)</option>
+                                        <option value="4">4 chunks</option>
+                                        <option value="5">5 chunks</option>
+                                        <option value="6">6 chunks (Strict)</option>
+                                        <option value="8">8 chunks (Very Strict)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="settings-two-col">
+                                <div class="module-item">
+                                    <span>Silence Gate (VAD RMS)</span>
+                                    <select id="env-wakeword-vad" class="voice-select-dropdown" aria-label="VAD Silence Cutoff">
+                                        <option value="0.0">0.0 (Disabled)</option>
+                                        <option value="10.0">10.0 (Quiet room)</option>
+                                        <option value="15.0">15.0 (Low noise)</option>
+                                        <option value="20.0" selected>20.0 (Default)</option>
+                                        <option value="30.0">30.0 (Moderate noise)</option>
+                                        <option value="50.0">50.0 (Noisy room)</option>
+                                        <option value="100.0">100.0 (Very noisy)</option>
+                                    </select>
+                                </div>
+                                <div class="module-item">
+                                    <span>One-Shot Audio Streaming</span>
+                                    <select id="env-wakeword-one-shot" class="voice-select-dropdown" aria-label="One-Shot Streaming">
+                                        <option value="true" selected>true (Stream immediately)</option>
+                                        <option value="false">false (Wait for pause)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="module-item">
+                                <span>Speaker Voiceprint Verification</span>
+                                <select id="env-speaker-verification" class="voice-select-dropdown" aria-label="Speaker Verification">
+                                    <option value="false" selected>false (Allow any speaker)</option>
+                                    <option value="true">true (Enforce voiceprint gate)</option>
+                                </select>
+                            </div>
+                            <div class="voice-actions-row">
+                                <button type="button" class="qa-btn compact primary" id="btn-save-stt-env">SAVE TO .ENV</button>
+                            </div>
+                        </div>
+
+                        <!-- ── Visual Agent, Smart Home & Server (.env) ── -->
+                        <div class="card system-env-card" data-cat="env">
+                            <div class="card-header"><span>Automation, Smart Home &amp; Server (.env)</span></div>
+                            <p class="settings-hint">Configure visual computer-control timeout, WiZ subnet broadcast, and SSE keep-alive.</p>
+                            <div class="module-item">
+                                <span>Visual Task Timeout</span>
+                                <select id="env-visual-timeout" class="voice-select-dropdown" aria-label="Visual Task Timeout">
+                                    <option value="30">30s (Quick tasks)</option>
+                                    <option value="60">60s</option>
+                                    <option value="90">90s</option>
+                                    <option value="120" selected>120s (Default)</option>
+                                    <option value="180">180s (Complex workflows)</option>
+                                    <option value="240">240s</option>
+                                    <option value="300">300s (5 minutes)</option>
+                                </select>
+                            </div>
+                            <div class="module-item">
+                                <span>WiZ Smart Home Broadcast</span>
+                                <select id="env-wiz-broadcast" class="voice-select-dropdown" aria-label="WiZ Broadcast Address">
+                                    <option value="255.255.255.255" selected>255.255.255.255 (Global Broadcast)</option>
+                                </select>
+                            </div>
+                            <div class="module-item">
+                                <span>SSE Heartbeat Interval</span>
+                                <select id="env-sse-heartbeat" class="voice-select-dropdown" aria-label="SSE Heartbeat">
+                                    <option value="5">5s (Aggressive keep-alive)</option>
+                                    <option value="10">10s</option>
+                                    <option value="15" selected>15s (Default)</option>
+                                    <option value="20">20s</option>
+                                    <option value="30">30s</option>
+                                    <option value="60">60s</option>
+                                </select>
+                            </div>
+                            <div class="voice-actions-row">
+                                <button type="button" class="qa-btn compact primary" id="btn-save-system-env">SAVE TO .ENV</button>
+                            </div>
+                        </div>
+
+                        <!-- ── Interactive .env File Manager (Full Span) ── -->
+                        <div class="card env-editor-card span-2" data-cat="env">
+                            <div class="card-header">
+                                <span>Environment Configuration (.env File Manager)</span>
+                                <div class="env-header-badge">LIVE ON DISK</div>
+                            </div>
+                            <p class="settings-hint">All parameters below are synced directly with your project's .env file. Edit any key and click Save.</p>
+                            <div class="env-toolbar">
+                                <input type="search" id="env-filter-input" class="env-search-box" placeholder="Filter .env variables..." aria-label="Filter environment variables">
+                                <button type="button" class="qa-btn compact" id="btn-add-env-var">+ ADD KEY</button>
+                                <button type="button" class="qa-btn compact" id="btn-reload-env">↻ RELOAD</button>
+                                <button type="button" class="qa-btn compact" id="btn-reset-env" title="Reset .env to defaults from .env.example">↺ RESTORE DEFAULTS</button>
+                                <button type="button" class="qa-btn compact primary" id="btn-save-all-env">SAVE ALL TO .ENV</button>
+                            </div>
+                            <div class="env-add-panel" id="env-add-panel" hidden>
+                                <input type="text" id="env-add-key-input" class="env-inline-input" placeholder="KEY_NAME (e.g. OLLAMA_KEEP_ALIVE)" aria-label="New environment variable name" autocomplete="off">
+                                <input type="text" id="env-add-val-input" class="env-inline-input" placeholder="Value..." aria-label="New environment variable value" autocomplete="off">
+                                <button type="button" class="qa-btn compact primary" id="btn-env-add-confirm">ADD</button>
+                                <button type="button" class="qa-btn compact" id="btn-env-add-cancel">CANCEL</button>
+                            </div>
+                            <div class="env-table-wrap">
+                                <div class="env-table-header">
+                                    <span class="col-key">VARIABLE NAME</span>
+                                    <span class="col-val">VALUE (.ENV)</span>
+                                    <span class="col-act">ACTION</span>
+                                </div>
+                                <div class="env-table-body" id="env-table-body">
+                                    <!-- Injected dynamically from .env -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card hud-widgets-card" data-cat="ui">
+                            <div class="card-header"><span>HUD Customization</span></div>
+                            <p class="settings-hint">Toggle tactical widgets across the console.</p>
+                            <div class="module-item">
+                                <span>Media Deck (Now Playing)</span>
+                                <label class="toggle-label">
+                                    <input type="checkbox" id="widget-toggle-media" checked> Visible
+                                </label>
+                            </div>
+                            <div class="module-item">
+                                <span>Active Plan Rail</span>
+                                <label class="toggle-label">
+                                    <input type="checkbox" id="widget-toggle-plan" checked> Visible
+                                </label>
+                            </div>
+                            <div class="module-item">
+                                <span>Schedule Engine Rail</span>
+                                <label class="toggle-label">
+                                    <input type="checkbox" id="widget-toggle-schedule" checked> Visible
+                                </label>
+                            </div>
+                            <div class="module-item">
+                                <span>Ambient Desktop Bar</span>
+                                <label class="toggle-label">
+                                    <input type="checkbox" id="widget-toggle-ambient" checked> Visible
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="card modules-panel" data-cat="ui">
                             <div class="card-header"><span>Modules</span></div>
-                            <div class="module-item mod-btn" id="wake-word-toggle" role="switch" aria-checked="false" tabindex="0" title="Server-side 'Hey Aura' detector (openWakeWord)">
-                                <span>Wake word ("Hey Aura")</span>
-                                <span class="wake-controls">
+                            <div class="module-item">
+                                <button type="button" class="module-switch-btn" id="wake-word-toggle" role="switch" aria-checked="false" title="Server-side 'Hey Aura' detector (openWakeWord)">
+                                    <span>Wake word ("Hey Aura")</span>
                                     <span class="status-idle module-status" id="wake-word-status" title="">OFF</span>
-                                    <button type="button" class="qa-btn compact" id="btn-wake-test" title="Say "Hey Aura" aloud — checks server detection for 10 seconds">TEST</button>
-                                </span>
+                                </button>
+                                <button type="button" class="qa-btn compact" id="btn-wake-test" title="Say &quot;Hey Aura&quot; aloud — checks server detection for 10 seconds">TEST</button>
                             </div>
                             <div class="module-item"><span>Voice core</span><span class="status-active module-status">ACTIVE</span></div>
                             <div class="module-item"><span>Schedule engine</span><span class="status-active module-status">ACTIVE</span></div>
@@ -478,38 +1058,38 @@
                             <div class="module-item"><span>Archive sync</span><span class="status-sync module-status">IDLE</span></div>
                         </div>
 
-                        <div class="card quick-actions-panel">
+                        <div class="card quick-actions-panel" data-cat="ui">
                             <div class="card-header"><span>Quick Actions</span></div>
-                            <p class="settings-hint">Configure the quick action chips in the chat bar. Drag to reorder (not implemented); click to edit.</p>
+                            <p class="settings-hint">Click any quick action below to edit its label or prompt.</p>
                             <div id="quick-actions-editor">
                                 <!-- Populated by script.js -->
                             </div>
-                            <button id="btn-add-quick-action" class="qa-btn wide">+ ADD ACTION</button>
-                            <button id="btn-save-quick-actions" class="qa-btn wide accent-text" style="margin-top: 8px;">SAVE ACTIONS</button>
+                            <button type="button" id="btn-add-quick-action" class="qa-btn wide">+ ADD ACTION</button>
+                            <button type="button" id="btn-save-quick-actions" class="qa-btn wide accent-text" style="margin-top: 8px;">SAVE ACTIONS</button>
                         </div>
 
-                        <div class="card proactive-panel">
+                        <div class="card proactive-panel" data-cat="env">
                             <div class="card-header">
                                 <span>Proactive Intelligence</span>
-                                <button id="toggle-proactive" class="qa-btn compact accent-text">ON</button>
+                                <button type="button" id="toggle-proactive" class="qa-btn compact accent-text">ON</button>
                             </div>
                             <p class="settings-hint">AURA warns you when thresholds are crossed.</p>
                             <div class="diag-item slider-item">
                                 <div class="diag-label"><span>CPU limit</span><span id="thresh-cpu-val">90%</span></div>
-                                <input type="range" id="thresh-cpu" min="50" max="100" value="90">
+                                <input type="range" id="thresh-cpu" min="50" max="100" value="90" aria-label="CPU limit percentage">
                             </div>
                             <div class="diag-item slider-item">
                                 <div class="diag-label"><span>GPU temp</span><span id="thresh-gpu-val">85°C</span></div>
-                                <input type="range" id="thresh-gpu" min="50" max="100" value="85">
+                                <input type="range" id="thresh-gpu" min="50" max="100" value="85" aria-label="GPU temperature limit">
                             </div>
                             <div class="diag-item slider-item">
                                 <div class="diag-label"><span>Battery minimum</span><span id="thresh-batt-val">20%</span></div>
-                                <input type="range" id="thresh-batt" min="5" max="50" value="20">
+                                <input type="range" id="thresh-batt" min="5" max="50" value="20" aria-label="Battery minimum percentage">
                             </div>
-                            <button id="btn-save-proactive" class="qa-btn wide">SAVE CONFIG</button>
+                            <button type="button" id="btn-save-proactive" class="qa-btn wide">SAVE CONFIG</button>
                         </div>
 
-                        <div class="card shortcuts-list-card">
+                        <div class="card shortcuts-list-card" data-cat="ui">
                             <div class="card-header"><span>Keyboard Shortcuts</span></div>
                             <div class="shortcut-item"><span class="shortcut-desc">Switch views</span><span class="shortcut-keys"><span class="key">1</span> - <span class="key">7</span></span></div>
                             <div class="shortcut-item"><span class="shortcut-desc">Open shortcuts</span><span class="shortcut-keys"><span class="key">?</span></span></div>
@@ -518,10 +1098,10 @@
                             <div class="shortcut-item"><span class="shortcut-desc">Close dialogs</span><span class="shortcut-keys"><span class="key">ESC</span></span></div>
                         </div>
 
-                        <div class="card onboard-replay-card">
+                        <div class="card onboard-replay-card" data-cat="env">
                             <div class="card-header"><span>First-Run Setup</span></div>
                             <p class="settings-hint">Re-run the onboarding health checklist.</p>
-                            <button id="btn-replay-onboard" class="qa-btn wide accent-text">REPLAY SETUP</button>
+                            <button type="button" id="btn-replay-onboard" class="qa-btn wide accent-text">REPLAY SETUP</button>
                         </div>
 
                     </div>
@@ -543,9 +1123,11 @@
         <div class="modal">
             <div class="modal-header">
                 <div class="modal-title">Keyboard Shortcuts</div>
-                <button class="modal-close" id="close-shortcuts" aria-label="Close">×</button>
+                <button type="button" class="modal-close" id="close-shortcuts" aria-label="Close">×</button>
             </div>
             <div class="shortcut-item"><span class="shortcut-desc">Switch views (Chat..Settings)</span><span class="shortcut-keys"><span class="key">1</span> - <span class="key">7</span></span></div>
+            <div class="shortcut-item"><span class="shortcut-desc">Command palette (Spotlight)</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">K</span></span></div>
+            <div class="shortcut-item"><span class="shortcut-desc">Fullscreen voice assistant</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">SPACE</span></span></div>
             <div class="shortcut-item"><span class="shortcut-desc">Open / close shortcuts</span><span class="shortcut-keys"><span class="key">?</span></span></div>
             <div class="shortcut-item"><span class="shortcut-desc">Clear console</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">L</span></span></div>
             <div class="shortcut-item"><span class="shortcut-desc">Toggle voice core</span><span class="shortcut-keys"><span class="key">CTRL</span> + <span class="key">M</span></span></div>
@@ -558,12 +1140,12 @@
         <div class="modal modal-narrow">
             <div class="modal-header">
                 <div class="modal-title" id="confirm-title">Confirm</div>
-                <button class="modal-close" id="confirm-x" aria-label="Close">×</button>
+                <button type="button" class="modal-close" id="confirm-x" aria-label="Close">×</button>
             </div>
             <p class="confirm-message" id="confirm-message">Are you sure?</p>
             <div class="confirm-actions">
-                <button class="qa-btn" id="confirm-cancel">CANCEL</button>
-                <button class="qa-btn danger" id="confirm-ok">CONFIRM</button>
+                <button type="button" class="qa-btn" id="confirm-cancel">CANCEL</button>
+                <button type="button" class="qa-btn danger" id="confirm-ok">CONFIRM</button>
             </div>
         </div>
     </div>
@@ -572,14 +1154,35 @@
     <div id="notif-drawer" class="notif-drawer" role="dialog" aria-label="Notifications">
         <div class="drawer-header">
             <span>NOTIFICATIONS</span>
-            <button id="close-drawer" class="icon-btn" aria-label="Close notifications">×</button>
+            <button type="button" id="close-drawer" class="icon-btn" aria-label="Close notifications">×</button>
         </div>
         <div id="notif-list" class="notif-list"></div>
     </div>
 
     <!-- ═══════════════ SCREENSHOT LIGHTBOX ═══════════════ -->
-    <div id="lightbox-overlay">
+    <div id="lightbox-overlay" role="dialog" aria-modal="true" aria-label="Screenshot preview">
+        <button type="button" id="lightbox-close" class="lightbox-close" aria-label="Close screenshot preview">×</button>
         <img id="lightbox-img" alt="Screenshot preview">
+    </div>
+
+    <!-- ═══════════════ COMMAND PALETTE SPOTLIGHT (Ctrl+K) ═══════════════ -->
+    <div class="palette-overlay" id="command-palette-overlay" role="dialog" aria-modal="true" aria-label="AURA Command Palette" hidden>
+        <div class="palette-backdrop" tabindex="-1"></div>
+        <div class="palette-modal">
+            <div class="palette-search-wrap">
+                <svg class="palette-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input type="text" id="palette-input" class="palette-input" placeholder="Search commands, views, actions, or themes..." autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="palette-results">
+                <kbd class="palette-esc-badge">ESC</kbd>
+            </div>
+            <div class="palette-results" id="palette-results" role="listbox">
+                <!-- Dynamically populated -->
+            </div>
+            <div class="palette-footer">
+                <span class="palette-hint"><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+                <span class="palette-hint"><kbd>↵</kbd> Select</span>
+                <span class="palette-hint"><kbd>ESC</kbd> Close</span>
+            </div>
+        </div>
     </div>
 
     <!-- Self-hosted vendor libraries -->
@@ -590,6 +1193,6 @@
     <script src="reactor.js"></script>
     <script src="realtime.js"></script>
     <script src="boot.js"></script>
-    <script src="script.js"></script>
+    <script src="script.js?v=20261125"></script>
 </body>
 </html>
