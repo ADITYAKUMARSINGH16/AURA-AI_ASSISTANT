@@ -2,32 +2,33 @@
 
 ![AURA Banner](static/logo_small.png)
 
-**AURA 2.0** is a locally-hosted, multi-modal AI assistant paired with a **Cinematic Sci-Fi Landing Page** and a real-time **Tactical HUD Command Console**. By default, cognition and vision run locally via [Ollama](https://ollama.com/) (**Gemma 4 E2B** for reasoning and **Qwen3-VL 4B** for vision), while a unified provider router also supports cloud backends (**Groq**, **NVIDIA NIM**, **Google Gemini**, **OpenAI**, and **OpenRouter**). AURA 2.0 combines dynamic intent routing, multi-step planning, computer vision and UI automation, local Desktop RAG, MCP server integration, ambient context awareness, security scanning, and continuous voice interaction.
+**AURA 2.0** is a locally-first, multi-modal autonomous AI assistant for Windows featuring a **Cinematic Landing Page**, a full-screen **Tactical HUD Command Console**, real-time **Server-Sent Events (SSE)** streaming, **Ambient Context Awareness**, **Local Desktop RAG**, and a **Model Context Protocol (MCP)** client.
+
+By default, cognition and vision run **100% locally** via [Ollama](https://ollama.com/) (**Gemma 4 E2B** for reasoning and **Qwen3-VL 4B** for vision), with optional cloud LLM routing (`llm_provider.py`) for **Groq**, **NVIDIA NIM**, **Google Gemini**, **OpenAI**, and **OpenRouter**, plus configurable offline/cloud voice pipelines.
 
 ---
 
 ## ⚡ Highlights
 
-- **Unified LLM Provider Router (`llm_provider.py`):** Run 100% locally via Ollama (`gemma4:e2b`) or switch in `.env` / HUD Settings to Groq, NVIDIA NIM, Google Gemini, OpenAI, or OpenRouter.
+- **Multi-Provider LLM Router (`llm_provider.py`):** Defaults to local Ollama (`gemma4:e2b` + `qwen3-vl:4b`) and supports seamless switching to Groq, NVIDIA NIM, Google Gemini, OpenAI, or OpenRouter via `.env` or HUD settings.
 - **Cinematic Landing Page (`/` & `/welcome`):**
-  - 3D mouse parallax tilt with smooth momentum lerp and 5-layer depth orbs (`static/welcome.html`).
-  - Three.js orbital particle trails (`static/reactor.js`) synchronized to rotational physics.
-  - CSS-animated feature card mini-demos, scroll progress indicator, live hero telemetry, and an interactive browser terminal.
+  - 3D mouse parallax tilt with smooth lerp momentum lag and 5-layer depth orbs.
+  - Glowing Three.js orbital particle trails and interactive reactor (`static/reactor.js`).
+  - CSS-only animated mini-demos on feature card hover, live hero telemetry bar, and interactive browser terminal.
 - **Tactical HUD Command Console (`/hud`):**
-  - 4 dynamic color themes (**Cyan**, **Crimson**, **Emerald**, **Violet**) with persistent UI config.
-  - Real-time **Server-Sent Events (SSE)** stream (`backend/event_bus.py` → `/api/events`) pushing telemetry, process sweeps, threat alerts, ambient context, media state, schedules, and permission prompts without polling.
-  - Spotlight panel search (`Ctrl + K`), audio waveform visualizer, and `SECURITY CLEARANCE` approval panel.
-- **Dynamic Intent Router & Skill Registry:** Classifies requests in `agent.py`, selects minimal tool subsets per category, and injects matching skills from `skills/` (`browser`, `coding`, `system`).
-- **Agentic Planner & Goals:** Multi-step autonomous task decomposition (`plans.json`, `goals.json`), dependency tracking, and live HUD progress updates.
-- **Vision & Desktop Automation:** Combines `qwen3-vl:4b`, Tesseract OCR (`vision.py`), Windows UI Automation (`pywinauto` in `tools/uia_tools.py`), and GUI control (`pyautogui` in `tools/computer_control_tools.py`).
+  - 4 Dynamic Color Themes: **Cyan (Default)**, **Crimson (Alert)**, **Emerald (Matrix)**, and **Violet (Psionic)** with persistent state.
+  - Real-time SSE updates (`backend/event_bus.py` → `/api/events` → `static/realtime.js`) for hardware thermals, processes, security threats, notifications, media, and ambient context.
+  - Quick panel search spotlight (`Ctrl + K`), streaming chat (`/api/chat/stream`), and **Security Clearance** approval modal.
+- **Dynamic Intent Routing & Skills (`agent.py`, `skill_registry.py`):** Pre-processes user inputs to classify intent across 12 categories (`CHAT`, `VISION`, `SYSTEM`, `COMPUTER_CONTROL`, `FILE`, `WEB_RESEARCH`, `MEMORY`, `SMART_HOME`, `SECURITY`, `PLANNER`, `VOICE`, `CODE`), dynamically subsets tools, and loads domain skills from `skills/`.
+- **Vision, UIA & GUI Desktop Automation:** Combines `qwen3-vl:4b`, Tesseract OCR, `pyautogui`, and **Windows UI Automation (`tools/uia_tools.py`)** to inspect windows and execute closed-loop visual tasks.
 - **Offline-Capable Voice Pipeline (`voice.py`):**
-  - **Wake Word:** Local OpenWakeWord (`models/hey_aura.onnx`) with barge-in guard, pre-roll one-shot capture, and optional speaker verification.
-  - **STT:** 100% offline **faster-whisper** (`local`, default) or Google SpeechRecognition (`cloud`).
-  - **TTS:** **Edge-TTS** (`edge`), 100% offline **Kokoro ONNX** (`kokoro`), or local `pyttsx3` fallback.
-- **Dual Memory & Desktop RAG:** Short-term session context (`memory.json`), persistent semantic facts (`ltm_db.json`), and local document indexing/search (`desktop_rag.db` via `tools/rag_tools.py`).
-- **Ambient Context Sentinel (`backend/ambient_sentinel.py`):** Passively tracks foreground window, active app, and clipboard context to inform proactive responses.
-- **MCP Client Integration (`mcp/client.py`):** Connects via stdio JSON-RPC 2.0 to external Model Context Protocol servers configured in `config/mcp_servers.json`.
-- **Local Security Center & Proactive Telemetry:** Scans listening ports, suspicious processes, Windows Defender/firewall status, removable devices, and home network devices, alongside a Windows System Tray daemon (`tray.py`).
+  - Local OpenWakeWord (`models/hey_aura.onnx`) with VAD, persistence, speaking barge-in threshold, one-shot pre-roll, and optional speaker verification.
+  - Configurable STT (`faster-whisper` local offline neural or Google SpeechRecognition) and TTS (`kokoro` local offline neural, Edge-TTS, or `pyttsx3` fallback).
+- **Ambient Context Sentinel (`backend/ambient_sentinel.py`):** Passively monitors the foreground window, active application, and clipboard state to provide real-time environmental context.
+- **Persistent Memory & Local Desktop RAG:** Dual-layer memory (`memory.json` + `ltm_db.json`) paired with local document indexing and querying (`tools/rag_tools.py` + `desktop_rag.db`).
+- **MCP Client (`mcp/client.py`):** Connects to external stdio JSON-RPC 2.0 MCP servers defined in `config/mcp_servers.json` and bridges discovered tools directly into AURA's toolset.
+- **Autonomous Planner, Goals & Code Interpreter:** Multi-step task decomposition (`plans.json`), persistent goal tracking (`goals.json`), scheduled tasks (`schedule.json`), and Python execution (`tools/interpreter_tools.py`).
+- **Local Security Center & System Tray:** Audits listening ports, suspicious processes, Windows Defender/firewall status, and removable devices, with a Windows system tray daemon (`tray.py`).
 
 ---
 
@@ -35,93 +36,57 @@
 
 | Interface | URL / Entrypoint | Description |
 |---|---|---|
-| **Cinematic Landing Page** | `http://127.0.0.1:8000/` (or `/welcome`) | Interactive showcase featuring 3D parallax, Three.js particle orbits, feature mini-demos, live telemetry, and interactive terminal. |
-| **Tactical Command HUD** | `http://127.0.0.1:8000/hud` (or `/hud.html`) | Primary operational dashboard with 4 color themes, live SSE telemetry, audio visualizers, security clearance, and agent chat. |
-| **System Tray Daemon** | `tray.py` / `start_aura.bat` | Background Windows taskbar daemon with quick-launch menu and server lifecycle management. |
-| **CLI Terminal Mode** | `python main.py` | Direct text/voice terminal loop without launching the web server. |
+| **Cinematic Landing Page** | `http://127.0.0.1:8000/` (or `/welcome`) | Interactive showcase (`static/welcome.html`) featuring Three.js particle orbits, reactor, hover mini-demos, live terminal, and telemetry. |
+| **Tactical Command HUD** | `http://127.0.0.1:8000/hud` | Primary operational dashboard (`static/hud.html`) with 4 color themes, live SSE telemetry, audio visualizer, settings, and agent chat. |
+| **System Tray Daemon** | `tray.py` / `start_aura.bat` | Background taskbar daemon (`pystray`) with quick launch options and proactive monitoring. |
+| **Classic Terminal Mode** | `python main.py` | CLI text and voice loop without launching the web server. |
 
 ---
 
-## 🛠️ AURA 2.0 Visual Architecture
+## 🛠️ AURA 2.0 Unified Architecture
+
+![AURA 2.0 Unified System Architecture](static/architecture.svg)
+
+### Request & Event Data Flow
 
 ```mermaid
-flowchart TB
-    subgraph Clients["1. Interfaces & Voice I/O"]
-        direction LR
-        Landing["Cinematic Landing\n/ & /welcome (welcome.html)"]
-        HUD["Tactical HUD\n/hud (hud.html + SSE)"]
-        Tray["Windows System Tray\n(tray.py)"]
-        CLI["Terminal CLI\n(main.py)"]
-        Voice["Voice Pipeline (voice.py)\nOpenWakeWord -> faster-whisper/Google STT\n-> Edge-TTS / Kokoro ONNX"]
-    end
-
-    subgraph Server["2. FastAPI Server & Real-Time Layer (api.py)"]
-        direction LR
-        REST["REST & Streaming APIs\n(/api/chat, /api/chat/stream, /api/rag/*)"]
-        SSE["SSE Event Bus\n(backend/event_bus.py -> /api/events)"]
-        Sentinel["Ambient Sentinel & Scheduler\n(backend/ambient_sentinel.py)"]
-    end
-
-    subgraph Core["3. Agent Core & Cognition"]
-        direction LR
-        Router["Intent Router & Agent Loop\n(agent.py)"]
-        Skills["Skill Registry\n(skills/browser, coding, system)"]
-        Perms["Permission Gate\n(permissions.py: SAFE / MEDIUM / HIGH)"]
-        LLM["Unified LLM Router (llm_provider.py)\nLocal: Ollama (gemma4:e2b)\nCloud: Groq, NIM, Gemini, OpenAI, OpenRouter"]
-    end
-
-    subgraph MemoryVision["4. Memory, Knowledge & Vision"]
-        direction LR
-        Mem["Dual Memory\n(memory.json + ltm_db.json)"]
-        RAG["Desktop RAG\n(desktop_rag.db)"]
-        Vis["Vision Pipeline (vision.py)\nTesseract OCR + qwen3-vl:4b"]
-    end
-
-    subgraph Execution["5. Tools & External Integrations"]
-        direction LR
-        SysTools["OS, UIA & GUI Tools\n(psutil, WMI, pywinauto, pyautogui)"]
-        SecTools["Security & Network\n(Ports, Defender, Processes, WiZ)"]
-        PlanTools["Planner, Goals & Code\n(plans.json, goals.json, Python Exec)"]
-        MCP["MCP Client (mcp/client.py)\nStdio JSON-RPC 2.0 -> MCP Servers"]
-    end
-
-    Clients --> REST
-    SSE --> HUD
-    Sentinel --> SSE
-    REST --> Router
-    Voice --> REST
-    Voice --> CLI
-    CLI --> Router
-
-    Router --> Skills
-    Router --> LLM
-    Router --> Perms
-    Router --> MemoryVision
-
-    Perms --> Execution
-    Vis --> SysTools
+flowchart LR
+    U["User (HUD / Landing / Tray / CLI)"] --> API["FastAPI Server (api.py)"]
+    API -->|"SSE /api/events"| BUS["Event Bus (backend/event_bus.py)"]
+    BUS -->|"Real-time Push"| U
+    API -->|"User Prompt"| AGENT["Agent & Intent Router (agent.py)"]
+    AGENT -->|"Skill Lookup"| SKILLS["Skill Registry (skill_registry.py)"]
+    AGENT -->|"Chat / Tool Calls"| LLM["LLM Provider Router (llm_provider.py)"]
+    LLM -->|"Local Default"| OLLAMA["Ollama (gemma4:e2b / qwen3-vl:4b)"]
+    LLM -->|"Optional Cloud"| CLOUD["Groq / NVIDIA / Gemini / OpenAI / OpenRouter"]
+    AGENT -->|"Risk Check"| PERM["Permission Gate (permissions.py)"]
+    PERM -->|"Approved"| TOOLS["Modular Tools & MCP Client (tools/, mcp/)"]
+    TOOLS -->|"OS / Vision / RAG / Voice"| SYS["Windows OS, Hardware, Memory & External Services"]
 ```
 
-### Core Subsystems:
-1. **Interfaces & Real-Time Bus:** `api.py` serves `static/welcome.html` and `static/hud.html`, while `backend/event_bus.py` broadcasts live change-detected payloads (`telemetry`, `threats_update`, `permissions_update`, `notifications_update`, `ambient_update`, `media`, `processes_update`, `schedule_update`, `security_update`, `logs_append`) over `/api/events`.
-2. **Agent Core & LLM Router:** `agent.py` classifies intent, loads relevant skills from `skill_registry.py`, routes inference through `llm_provider.py` (Ollama local or cloud providers), and enforces safety gates via `permissions.py`.
-3. **Vision & Desktop Control:** `vision.py` validates screenshots, extracts text with Tesseract OCR, and analyzes UI state with `qwen3-vl:4b` to drive `execute_visual_task` and `pywinauto` UIA actions.
-4. **Memory & Desktop RAG:** `memory.py` manages conversational context (`memory.json`) and long-term facts (`ltm_db.json`), while `tools/rag_tools.py` indexes local documents into `desktop_rag.db`.
-5. **Ambient Sentinel & MCP:** `backend/ambient_sentinel.py` tracks the active window and clipboard; `mcp/client.py` connects to stdio MCP servers defined in `config/mcp_servers.json` and exposes their tools dynamically.
+### Core Subsystems
+
+1. **API & SSE Event Bus (`api.py`, `backend/event_bus.py`):** Runs 10 staggered async background detectors (`telemetry`, `threats_update`, `permissions_update`, `notifications_update`, `logs_append`, `schedule_update`, `processes_update`, `security_update`, `ambient_update`, `media_update`) and pushes state changes to connected HUD tabs.
+2. **Cognitive Core & Intent Router (`agent.py`, `llm_provider.py`, `skill_registry.py`):** Routes prompts to the active LLM provider, selects minimal tool subsets, and injects matching skills.
+3. **Vision & UIA (`vision.py`, `tools/computer_control_tools.py`, `tools/uia_tools.py`):** Captures active display frames, extracts text via Tesseract OCR, inspects Windows UI Automation trees, and executes closed-loop GUI actions via `qwen3-vl:4b` and `pyautogui`.
+4. **Voice Pipeline (`voice.py`):** Combines local OpenWakeWord (`models/hey_aura.onnx`) with configurable local (`faster-whisper`, `kokoro`) or cloud (`speech_recognition`, `edge-tts`) STT/TTS engines.
+5. **Memory, RAG & Ambient Sentinel (`memory.py`, `tools/rag_tools.py`, `backend/ambient_sentinel.py`):** Maintains conversational context (`memory.json`), long-term facts (`ltm_db.json`), indexed local files (`desktop_rag.db`), and live foreground window/clipboard state.
+6. **Security & Diagnostics (`tools/security_tools.py`, `tools/windows_tools.py`, `tools/diagnostic_tools.py`):** Monitors CPU/GPU/RAM/Disk/Battery/Network via `psutil`, `wmi`, and `winreg`, alongside port, process, firewall, and Defender checks.
+7. **MCP Bridge (`mcp/client.py`, `tools/mcp_tools.py`):** Connects over stdio JSON-RPC 2.0 to servers configured in `config/mcp_servers.json` and exposes their tools dynamically.
 
 ---
 
 ## 📦 Prerequisites
 
 - **Python 3.10+**
-- **Windows OS** (required for WMI telemetry, Registry queries, UIA, and Windows Defender/firewall checks)
+- **Windows OS** (required for WMI telemetry, Registry access, Windows UIA, and security diagnostics)
 - **Ollama** installed and running ([Download Ollama](https://ollama.com/download))
-- **Local Models** pulled in Ollama (required by `config.py` at startup):
+- **Local Models** pulled via Ollama:
   ```bash
   ollama pull gemma4:e2b
   ollama pull qwen3-vl:4b
   ```
-- **Tesseract OCR** for screen text extraction ([Download Tesseract](https://github.com/UB-Mannheim/tesseract/wiki))
+- **Tesseract OCR** for screen vision support ([Download Tesseract](https://github.com/UB-Mannheim/tesseract/wiki))
 - **Microphone & Speakers** for wake-word and voice interaction
 
 ---
@@ -139,7 +104,11 @@ flowchart TB
    pip install -r requirements.txt
    ```
 
-3. **Configure Environment:**
+3. **Optional — Download Offline Voice Models:**
+   - Run `download_offline_stt.bat` (or `python tools/download_faster_whisper.py`) for local `faster-whisper` STT.
+   - Run `download_offline_voice.bat` (or `python tools/download_kokoro_voice.py`) for local `kokoro` TTS.
+
+4. **Configure Environment:**
    Copy `.env.example` to `.env` and adjust settings as needed:
    ```env
    AURA_LLM_PROVIDER=ollama
@@ -148,28 +117,25 @@ flowchart TB
    AURA_STT_BACKEND=local
    AURA_TTS_BACKEND=edge
    ```
-   To use a cloud LLM provider (`groq`, `nvidia`, `gemini`, `openai`, `openrouter`), set `AURA_LLM_PROVIDER` and the corresponding API key in `.env` (or configure it from the HUD settings panel).
-
-4. **Optional Offline Voice Assets:**
-   Use `download_offline_stt.bat` / `download_offline_voice.bat` (or `tools/download_faster_whisper.py` and `tools/download_kokoro_voice.py`) to pre-fetch local STT/TTS models.
+   Cloud API keys (`GROQ_API_KEY`, `NVIDIA_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) can also be configured in `.env` or directly from the HUD Settings panel.
 
 ---
 
 ## 🎮 Running AURA
 
 ### 1. Automated Launch (Recommended)
-Double-click `start_aura.bat`. This requests Administrator privileges (for hardware sensors, event logs, and firewall inspections) and starts the `tray.py` daemon with the web server.
+Double-click `start_aura.bat`. This requests Administrator privileges (needed for hardware sensors, event logs, and firewall inspections) and launches `tray.py` alongside the FastAPI server.
 
 ### 2. Manual Web Server Launch
-Start the FastAPI / Uvicorn server directly (bound to loopback `127.0.0.1` for local-only security):
+Start the FastAPI / Uvicorn server directly:
 ```bash
 python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
-- **Landing Page:** `http://127.0.0.1:8000/`
-- **Tactical HUD:** `http://127.0.0.1:8000/hud`
+- Open `http://127.0.0.1:8000/` (or `/welcome`) for the **Cinematic Landing Page**.
+- Open `http://127.0.0.1:8000/hud` for the **Tactical Command HUD**.
 
 ### 3. Classic Terminal Mode
-Run AURA exclusively in the CLI for text/voice interactions without the web server:
+Run AURA exclusively in the CLI without the web server:
 ```bash
 python main.py
 ```
@@ -179,58 +145,62 @@ python main.py
 ## 📂 Project Structure
 
 ```text
-├── api.py                    # FastAPI server (REST, SSE /api/events, Landing, HUD, Scheduler)
+├── api.py                    # FastAPI server, REST/SSE endpoints & background detectors
 ├── agent.py                  # Core agent reasoning, Intent Router & tool dispatcher
 ├── llm_provider.py           # Unified LLM router (Ollama, Groq, NVIDIA, Gemini, OpenAI, OpenRouter)
+├── skill_registry.py         # Dynamic skill loader from skills/*/skill.json
 ├── main.py                   # CLI terminal interface
 ├── tray.py                   # Windows System Tray daemon
-├── vision.py                 # Multi-modal vision pipeline (Tesseract OCR + Qwen3-VL)
-├── voice.py                  # Wake-word (OpenWakeWord), STT (faster-whisper/Google), TTS (Edge/Kokoro)
-├── memory.py                 # Conversation & long-term memory manager
-├── permissions.py            # Security & tool execution permission gate
-├── skill_registry.py         # Dynamic skill loader for skills/*/skill.json
-├── planner_state.py          # Persistent multi-step plan state manager
-├── notifications.py          # Notification queue for HUD & wake-word events
-├── media_info.py             # Windows SMTC media session reader
-├── config.py                 # Environment & path-safe configuration loader
-├── requirements.txt          # Python dependencies
+├── vision.py                 # Multi-modal vision pipeline (OCR + Qwen3-VL)
+├── voice.py                  # Wake-word detection, STT (faster-whisper/Google) & TTS (Kokoro/Edge)
+├── memory.py                 # Short-term & long-term memory manager
+├── permissions.py            # Risk-based tool execution & approval gate
+├── planner_state.py          # Multi-step plan state management
+├── notifications.py          # Notification queue & SSE push bridge
+├── media_info.py             # Active Windows media session reader
+├── config.py                 # Environment & containment-checked path configuration
 ├── .env.example              # Reference environment configuration
+├── requirements.txt          # Python dependencies
 ├── backend/
-│   ├── event_bus.py          # Asyncio SSE broadcast hub
-│   └── ambient_sentinel.py   # Foreground window & clipboard context monitor
+│   ├── ambient_sentinel.py   # Passive foreground window & clipboard monitor
+│   └── event_bus.py          # Thread-safe asyncio SSE broadcast hub
+├── config/
+│   ├── mcp_servers.json      # External stdio MCP server definitions
+│   └── quick_actions.json    # HUD quick action presets
 ├── mcp/
-│   ├── client.py             # Stdio JSON-RPC 2.0 MCP client
-│   └── servers/              # Local MCP servers (e.g., echo_server.py)
-├── skills/                   # Domain skill definitions (browser, coding, system)
-├── config/                   # mcp_servers.json & quick_actions.json
+│   └── client.py             # Stdio JSON-RPC 2.0 MCP client & tool bridge
+├── models/                   # Local wake-word & voice models (e.g. hey_aura.onnx)
+├── skills/                   # Modular agent skills (browser, coding, system, servers)
 ├── static/
+│   ├── architecture.svg      # Visual system architecture diagram
 │   ├── welcome.html          # Cinematic landing page
-│   ├── landing.css / .js     # Landing page styles, parallax & terminal
-│   ├── reactor.js            # Three.js orbital particle engine
-│   ├── hud.html              # Tactical HUD interface
+│   ├── landing.css / .js     # Landing page styles, Three.js & interactive terminal
+│   ├── reactor.js            # Interactive 3D/canvas reactor module
+│   ├── hud.html              # Tactical Command HUD
 │   ├── style.css / tokens.css# HUD themes & design tokens
-│   └── script.js / realtime.js / boot.js  # HUD client & SSE handler
+│   ├── script.js / boot.js   # HUD logic & initialization
+│   └── realtime.js           # SSE client for live HUD updates
 ├── tools/
 │   ├── __init__.py           # Unified tool exports
-│   ├── ambient_tools.py      # Ambient context queries
-│   ├── app_tools.py          # Application launcher/closer
-│   ├── computer_control_tools.py # Closed-loop GUI automation (pyautogui + VLM)
+│   ├── ambient_tools.py      # Ambient context query tool
+│   ├── app_tools.py          # Application launch/close tools
+│   ├── computer_control_tools.py # Closed-loop visual GUI automation
 │   ├── diagnostic_tools.py   # Self-diagnostics
-│   ├── file_tools.py         # Directory listing & file reading
-│   ├── goal_tools.py         # Persistent goal tracking
-│   ├── interpreter_tools.py  # Sandboxed Python code execution
+│   ├── file_tools.py         # Safe directory & file inspection
+│   ├── goal_tools.py         # Persistent goal management
+│   ├── interpreter_tools.py  # Python code execution
 │   ├── mcp_tools.py          # MCP server listing, reload & tool invocation
-│   ├── memory_tools.py       # Long-term knowledge read/write/forget
+│   ├── memory_tools.py       # Long-term memory read/write/forget
 │   ├── planner_tools.py      # Multi-step plan creation & progress reporting
-│   ├── rag_tools.py          # Local Desktop RAG indexing & querying
-│   ├── security_tools.py     # Threat scan, firewall, Defender & listening ports
+│   ├── rag_tools.py          # Local desktop RAG indexing & search
+│   ├── security_tools.py     # Defender, firewall, ports & threat analysis
 │   ├── smart_home_tools.py   # WiZ smart home discovery & control
-│   ├── spotify_tools.py      # Spotify playback & search
-│   ├── system_tools.py       # OS info, media, power, schedule & screen read
-│   ├── uia_tools.py          # Windows UI Automation (pywinauto)
-│   ├── web_tools.py          # Web search (ddgs)
-│   └── windows_tools.py      # CPU, GPU, RAM, disk, battery, services & event logs
-└── tests/                    # Pytest suite (health, tools, RAG, MCP, voice, UI)
+│   ├── spotify_tools.py      # Spotify search & playback
+│   ├── system_tools.py       # System info, clipboard, media, power & schedules
+│   ├── uia_tools.py          # Windows UI Automation element inspection & control
+│   ├── web_tools.py          # Web search
+│   └── windows_tools.py      # WMI/psutil hardware & Windows OS telemetry
+└── tests/                    # Automated test suite
 ```
 
 ---
@@ -241,50 +211,39 @@ Every tool call passes through `permissions.py` before execution:
 
 | Level | Behavior | Examples |
 |---|---|---|
-| **SAFE / LOW** | Runs immediately | System info, web search, read file, security status scanners (`get_listening_ports`, `get_suspicious_files`, `get_removable_devices`, `analyze_suspicious_processes`) |
-| **MEDIUM** | Needs approval unless **Trusted Mode** is ON in the HUD | Open/close apps, media, smart home, screen capture (`read_screen`), `run_threat_scan` |
-| **HIGH / CRITICAL** | Always needs approval via the HUD **SECURITY CLEARANCE** panel or a conversational `"yes"` | GUI automation (`execute_visual_task`), memory deletion (`forget_memory`), shutdown/restart |
-
-Pending actions appear in the HUD panel with **AUTHORIZE / REJECT** buttons; approving makes AURA re-run the tool automatically.
+| **SAFE** | Executes immediately | `get_system_time`, `get_system_info`, `get_cpu_info`, `get_gpu_info`, `get_ram_usage`, `get_disk_usage`, `list_directory`, `get_active_window`, `search_memory`, `list_goals`, `run_aura_diagnostics` |
+| **LOW** | Executes automatically when clearly requested | `web_search`, `read_file`, `get_listening_ports`, `get_suspicious_files`, `get_windows_defender_status`, `get_firewall_status`, `analyze_suspicious_processes`, `remember_fact` |
+| **MEDIUM** | Needs approval unless **Trusted Mode** is ON in the HUD | `open_application`, `close_application`, `control_media`, `read_screen`, `run_threat_scan`, smart home controls |
+| **HIGH / CRITICAL** | Always requires explicit approval via HUD **Security Clearance** or conversational confirmation | `execute_visual_task`, `forget_memory`, `control_system_power` (shutdown/restart) |
 
 ---
 
 ## 🎙️ Voice Pipeline Privacy
 
 - **Wake Word (`"Hey Aura"`):** Fully offline via local OpenWakeWord (`models/hey_aura.onnx`). Test standalone with `python test_wakeword.py --duration 30`.
-- **Speech-to-Text (STT):** Defaults to `AURA_STT_BACKEND=local` (**faster-whisper**, 100% offline). Switching to `cloud` uses Google SpeechRecognition, which sends audio clips to Google's servers.
-- **Text-to-Speech (TTS):** Defaults to `AURA_TTS_BACKEND=edge` (Microsoft Edge-TTS cloud neural service). Set `AURA_TTS_BACKEND=kokoro` for 100% offline local neural TTS, or rely on the offline `pyttsx3` fallback.
-
----
-
-## 🧪 Testing
-
-Run the test suite with `pytest`:
-```bash
-pytest tests/
-```
+- **Speech-to-Text (STT):** Defaults to `AURA_STT_BACKEND=local` (`faster-whisper`, 100% offline). Switching to `cloud` uses Google's `speech_recognition` service.
+- **Text-to-Speech (TTS):** Uses `edge` (Microsoft Edge-TTS, cloud neural) by default with `pyttsx3` offline fallback, or set `AURA_TTS_BACKEND=kokoro` for 100% offline local neural synthesis.
 
 ---
 
 ## ⚠️ Known Limitations
 
-- The wake-word model can false-trigger on long sustained tones (~1 kHz); keep `AURA_WAKEWORD_THRESHOLD` at `0.60+` if this affects you.
-- On 4 GB VRAM GPUs, `gemma4:e2b` partially offloads to CPU: expect ~10–30 s per response and a slower intent-router pass. Lower `OLLAMA_NUM_CTX`, disable the router with `AURA_INTENT_ROUTER=off`, or switch `AURA_LLM_PROVIDER` to a cloud provider to reduce latency.
-- Running both the local main model and vision model back-to-back causes model load/unload churn in Ollama on small VRAM budgets.
+- The wake-word model can false-trigger on sustained ~1 kHz tones; keep `AURA_WAKEWORD_THRESHOLD` at `0.60+` if affected.
+- On 4 GB VRAM GPUs, `gemma4:e2b` partially offloads to CPU (expect ~10–30 s per response and a slower intent-router pass). Lower `OLLAMA_NUM_CTX` or set `AURA_INTENT_ROUTER=off` to reduce latency.
+- Running the main LLM and `qwen3-vl:4b` back-to-back on small VRAM budgets causes Ollama model load/unload churn.
 
 ---
 
 ## ⌨️ Interactive Features & Easter Eggs
 
-- **HUD Color Themes:** Click the 4 theme dots under `SIGNAL / UPLINK` on the HUD to switch between Cyan, Crimson, Emerald, and Violet.
-- **Spotlight Panel Search:** Press `Ctrl + K` in the HUD to quickly jump to any diagnostic panel.
-- **Feature Card Mini-Demos:** Hover over any of the 6 feature cards on the landing page to view interactive animated mockups.
-- **Interactive Landing Terminal:** Type `help`, `status`, `scan`, `whoami`, `ping`, `threat`, `time`, or `about` directly in the browser terminal.
-- **Web Audio Sound Effects:** Click the speaker icon in the navigation bar to toggle cybernetic interaction audio.
-- **Konami Code:** Press `↑ ↑ ↓ ↓ ← → ← → B A` on the landing page for a secret visual overload!
+- **HUD Color Themes:** Click the 4 theme dots under `SIGNAL / UPLINK` in `/hud` to switch between Cyan, Crimson, Emerald, and Violet.
+- **Spotlight Panel Search:** Press `Ctrl + K` in the HUD to jump to any diagnostic panel.
+- **Feature Card Mini-Demos:** Hover over the feature cards on `/` to view interactive animated mockups.
+- **Interactive Landing Terminal:** Type `help`, `status`, `scan`, `whoami`, `ping`, `threat`, `time`, or `about` in the landing page terminal.
+- **Konami Code:** Press `↑ ↑ ↓ ↓ ← → ← → B A` on the landing page for a secret visual overload.
 
 ---
 
 ## 🛡️ License
 
-Created for personal and educational use. Local models and offline voice backends keep data on-device; see *Voice Pipeline Privacy* and *Unified LLM Provider Router* for optional cloud integrations.
+Created for personal and educational use. Local LLM, vision, wake-word, RAG, and optional offline voice pipelines run on-device; see *Voice Pipeline Privacy* and `.env.example` for optional cloud integrations.
